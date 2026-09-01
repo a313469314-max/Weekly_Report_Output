@@ -1,0 +1,52 @@
+import type { MetricDefinition, MetricKey } from './contracts';
+
+export const METRICS: MetricDefinition[] = [
+  { key: 'spend', label: '消耗', group: '基础', format: 'currency' },
+  { key: 'activatedDevices', label: '激活设备数', group: '基础', format: 'number' },
+  { key: 'activationCost', label: '激活成本', group: '成本', format: 'currency' },
+  { key: 'sameDayPayingDevices', label: '当日付费设备数', group: '收入', format: 'number' },
+  { key: 'sameDayPayingCost', label: '当日付费成本', group: '成本', format: 'currency' },
+  { key: 'sameDayPayment', label: '当日付费金额', group: '收入', format: 'currency' },
+  { key: 'payingDevices', label: '付费设备数', group: '收入', format: 'number' },
+  { key: 'payingCost', label: '付费成本', group: '成本', format: 'currency' },
+  { key: 'payment', label: '付费金额', group: '收入', format: 'currency' },
+  { key: 'firstDayRoi', label: '首日ROI', group: '比例', format: 'percent' },
+  { key: 'roi', label: 'ROI', group: '比例', format: 'percent' },
+  { key: 'loginDevices', label: '登录设备数', group: '基础', format: 'number' },
+  { key: 'firstDayLtv', label: '首日LTV', group: 'LTV', format: 'currency' },
+  { key: 'ltv', label: 'LTV', group: 'LTV', format: 'currency' },
+  { key: 'impressions', label: '展示', group: '其他', format: 'number' },
+  { key: 'clicks', label: '点击', group: '其他', format: 'number' },
+  { key: 'installs', label: '安装数', group: '其他', format: 'number' },
+  { key: 'registrationDevices', label: '注册设备数', group: '其他', format: 'number' },
+  { key: 'loginCost', label: '登录成本', group: '成本', format: 'currency' },
+  { key: 'registrationCost', label: '注册成本', group: '成本', format: 'currency' },
+  { key: 'firstDayArppu', label: '首日ARPPU', group: '收入', format: 'currency' },
+  { key: 'arppu', label: 'ARPPU', group: '收入', format: 'currency' },
+  { key: 'clickRate', label: '点击率', group: '比例', format: 'percent' },
+  { key: 'cpm', label: 'CPM', group: '成本', format: 'currency' },
+  { key: 'clickActivationRate', label: '点击激活率', group: '比例', format: 'percent' },
+  { key: 'activationRegistrationRate', label: '激活注册率', group: '比例', format: 'percent' },
+  { key: 'activationLoginRate', label: '激活登录率', group: '比例', format: 'percent' },
+  { key: 'activationPayRate', label: '激活付费率', group: '比例', format: 'percent' },
+  { key: 'day2Roi', label: '次日ROI', group: '比例', format: 'percent' },
+  { key: 'day3Roi', label: '3日ROI', group: '比例', format: 'percent' },
+  { key: 'day7Roi', label: '7日ROI', group: '比例', format: 'percent' },
+  { key: 'day30Roi', label: '30日ROI', group: '比例', format: 'percent' },
+];
+
+export const DEFAULT_METRICS: MetricKey[] = [
+  'spend',
+  'activatedDevices',
+  'activationCost',
+  'sameDayPayingDevices',
+  'sameDayPayingCost',
+  'sameDayPayment',
+  'payingDevices',
+  'payingCost',
+  'payment',
+  'firstDayRoi',
+  'roi',
+];
+
+export const metricByKey = new Map(METRICS.map((metric) => [metric.key, metric]));
