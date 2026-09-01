@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDailyQuery, datePickerDayAriaLabel, datePickerYearFromHeader, dateRange, incomeLabelForType, isSelectedVersionCurrent, missingPidsFromFilterLabel, queryConditionMismatches, selectValidVersionCandidates } from '../src/main/q1-connector';
+import { buildDailyQuery, ConnectorError, datePickerDayAriaLabel, datePickerYearFromHeader, dateRange, incomeLabelForType, isSelectedVersionCurrent, missingPidsFromFilterLabel, queryConditionMismatches, selectValidVersionCandidates, shouldRetryDailyPageSetup } from '../src/main/q1-connector';
 
 describe('game version selection', () => {
   it('returns all valid versions for manual selection', () => {
@@ -34,6 +34,13 @@ describe('game version selection', () => {
     expect(query.startDate).toBe('2026-08-12');
     expect(query.endDate).toBe('2026-08-12');
     expect(query.paymentStatsEndDate).toBe('2026-08-29');
+  });
+
+  it('retries daily page initialization only once for transient date-control failures', () => {
+    expect(shouldRetryDailyPageSetup(new ConnectorError('QUERY_CONDITIONS_NOT_APPLIED', '日期控件未打开'), 0)).toBe(true);
+    expect(shouldRetryDailyPageSetup(new ConnectorError('REPORT_LOAD_TIMEOUT', '页面未就绪'), 0)).toBe(true);
+    expect(shouldRetryDailyPageSetup(new ConnectorError('QUERY_CONDITIONS_NOT_APPLIED', '日期控件未打开'), 1)).toBe(false);
+    expect(shouldRetryDailyPageSetup(new ConnectorError('PID_FILTER_NOT_APPLIED', 'PID 未筛选'), 0)).toBe(false);
   });
 
   it('confirms only complete PID values shown in the top filter label', () => {

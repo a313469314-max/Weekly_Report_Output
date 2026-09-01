@@ -35,9 +35,16 @@
   "build": {
     "appId": "com.q1.ops-report-generator",
     "productName": "后台数据报表生成器",
+    "icon": "build/icon.ico",
     "files": [
       "out/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
+      }
     ],
     "asar": true,
     "directories": {

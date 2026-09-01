@@ -129,6 +129,17 @@ export interface ReportQuery {
   includePitcherDetails: boolean;
 }
 
+export interface FilterTemplate {
+  id: string;
+  name: string;
+  gameId: string;
+  gameVersionId: string;
+  pidInput: string;
+  incomeType: IncomeType;
+  includeReattribution: boolean;
+  includePitcherDetails: boolean;
+}
+
 export interface RealtimeQuery {
   gameId: string;
   gameVersionId: string;

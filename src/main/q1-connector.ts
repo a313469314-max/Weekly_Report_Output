@@ -284,6 +284,12 @@ export class ConnectorError extends Error {
   }
 }
 
+export function shouldRetryDailyPageSetup(error: unknown, attempt: number): error is ConnectorError {
+  return attempt === 0
+    && error instanceof ConnectorError
+    && ['QUERY_CONDITIONS_NOT_APPLIED', 'REPORT_LOAD_TIMEOUT'].includes(error.code);
+}
+
 export function dateRange(start: string, end: string): string[] {
   const first = new Date(`${start}T00:00:00Z`);
   const last = new Date(`${end}T00:00:00Z`);
@@ -1355,6 +1361,25 @@ export class Q1Connector {
     });
   }
 
+  private async prepareDailyOverview(query: ReportQuery): Promise<void> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.openOverviewPage(query.gameId, query.gameVersionId, query.includeReattribution, true);
+        await this.setReportFilters(query);
+        await this.setPidFilters(query.pids);
+        await this.waitForReportPage('overview.pid-page-ready');
+        return;
+      } catch (error) {
+        if (!shouldRetryDailyPageSetup(error, attempt)) throw error;
+        await this.diagnostics.event('overview.day.setup-retry', {
+          stage: 'daily-page-setup',
+          code: error.code,
+          result: 'retry',
+        });
+      }
+    }
+  }
+
   private async pullOverviewDaily(query: ReportQuery, config: ProjectConfig, onProgress?: (value: number) => void, options: PullOptions = {}): Promise<ReportData> {
     const dates = dateRange(query.startDate, query.endDate);
     if (dates.length === 0) throw new ConnectorError('INVALID_DATE_RANGE', '开始日期不能晚于结束日期，请重新选择日期范围。');
@@ -1365,10 +1390,7 @@ export class Q1Connector {
     for (const [index, date] of dates.entries()) {
       const dayQuery = buildDailyQuery(query, date);
       await this.diagnostics.event('overview.day.started', { mode: 'single-day' });
-      await this.openOverviewPage(dayQuery.gameId, dayQuery.gameVersionId, dayQuery.includeReattribution, true);
-      await this.setReportFilters(dayQuery);
-      await this.setPidFilters(dayQuery.pids);
-      await this.waitForReportPage('overview.pid-page-ready');
+      await this.prepareDailyOverview(dayQuery);
       const batch = await this.clickQuery();
       onProgress?.((index + 0.55) / dates.length);
       const report = await this.readQueryBatch(date, dayQuery, config, batch, options, true);

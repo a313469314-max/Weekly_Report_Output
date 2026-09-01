@@ -94,6 +94,38 @@ describe('project configuration', () => {
     expect(projectConfigForGame(result.document, '2172').fileNameRule).toBe(createDefaultProjectConfig().fileNameRule);
   });
 
+  it('keeps global filter templates with their saved game version during migration', () => {
+    const project = { ...createDefaultProjectConfig(), gameId: '2170' };
+    const result = migrateStoredProjectConfig({
+      version: 3,
+      activeGameId: '2170',
+      projects: { '2170': project },
+      filterTemplates: [{
+        id: 'template-1',
+        name: '国服安卓收入',
+        gameId: '2170',
+        gameVersionId: 'version-42',
+        pidInput: '2170405, 2170304',
+        incomeType: 'amount',
+        includeReattribution: false,
+        includePitcherDetails: true,
+      }],
+    });
+
+    expect(result.migrated).toBe(false);
+    expect(result.document.filterTemplates).toEqual([{
+      id: 'template-1',
+      name: '国服安卓收入',
+      gameId: '2170',
+      gameVersionId: 'version-42',
+      pidInput: '2170405, 2170304',
+      incomeType: 'amount',
+      includeReattribution: false,
+      includePitcherDetails: true,
+    }]);
+    expect(migrateStoredProjectConfig({ version: 2, activeGameId: '2170', projects: { '2170': project } }).document.filterTemplates).toEqual([]);
+  });
+
   it('refreshes the realtime payment statistics end date when loading a saved project', () => {
     const saved = createDefaultProjectConfig();
     saved.gameId = '2170';

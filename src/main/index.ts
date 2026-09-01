@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell, WebContentsView } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray, WebContentsView } from 'electron';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
@@ -6,7 +6,7 @@ import { ConfigStore } from './config-store';
 import { SessionVault } from './security-store';
 import { ConnectorError, isSelectedVersionCurrent, Q1Connector, type BrowserHost } from './q1-connector';
 import { createDefaultProjectConfig } from '../shared/defaults';
-import type { ProjectConfig, RealtimeQuery, ReportQuery } from '../shared/contracts';
+import type { FilterTemplate, ProjectConfig, RealtimeQuery, ReportQuery } from '../shared/contracts';
 import { parsePidInput, validatePids, validateRealtimePids } from '../domain/pid';
 import { writeWorkbook } from '../export/workbook';
 import { buildRealtimeText } from '../engine/realtime';
@@ -14,13 +14,21 @@ import { parseCaptureProbe, type CaptureProbeRequest } from './capture-probe';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let vault: SessionVault;
 let connector: Q1Connector | null = null;
+let isExplicitQuit = false;
 const configStore = new ConfigStore();
 const BROWSER_PANEL_WIDTH = 480;
 const BROWSER_TOOLBAR_HEIGHT = 82;
 const OPS_ORIGIN = 'https://ops.q1.com';
 const captureProbe = parseCaptureProbe(process.env.OPS_REPORT_CAPTURE_PROBE);
+
+function applicationIconPath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icon.ico')
+    : join(app.getAppPath(), 'build', 'icon.ico');
+}
 
 interface BrowserTab {
   id: string;
@@ -313,6 +321,7 @@ async function createMainWindow(): Promise<void> {
     minWidth: 1100,
     minHeight: 720,
     title: '后台数据报表生成器',
+    icon: applicationIconPath(),
     webPreferences: {
       preload: join(currentDir, '../preload/index.js'),
       contextIsolation: true,
@@ -324,9 +333,36 @@ async function createMainWindow(): Promise<void> {
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   if (devUrl) await mainWindow.loadURL(devUrl);
   else await mainWindow.loadFile(join(currentDir, '../renderer/index.html'));
+  mainWindow.on('close', (event) => {
+    if (isExplicitQuit) return;
+    event.preventDefault();
+    mainWindow?.hide();
+  });
   mainWindow.on('closed', () => { mainWindow = null; });
   mainWindow.on('resize', layoutBrowserViews);
   mainWindow.webContents.on('did-finish-load', sendBrowserState);
+}
+
+async function showMainWindow(): Promise<void> {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    await createMainWindow();
+    return;
+  }
+  mainWindow.show();
+  mainWindow.focus();
+  layoutBrowserViews();
+}
+
+function createTray(): void {
+  const icon = nativeImage.createFromPath(applicationIconPath());
+  tray = new Tray(icon);
+  tray.setToolTip('后台数据报表生成器');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '显示主窗口', click: () => { void showMainWindow(); } },
+    { type: 'separator' },
+    { label: '退出程序', click: () => { isExplicitQuit = true; app.quit(); } },
+  ]));
+  tray.on('double-click', () => { void showMainWindow(); });
 }
 
 async function runCaptureProbe(request: CaptureProbeRequest): Promise<void> {
@@ -413,6 +449,8 @@ function registerIpc(): void {
   });
   ipcMain.handle('app:load-config', async (_event, gameId?: string) => configStore.load(gameId));
   ipcMain.handle('app:save-config', async (_event, config: ProjectConfig, gameId?: string) => configStore.save(config, gameId));
+  ipcMain.handle('app:load-filter-templates', async () => configStore.loadFilterTemplates());
+  ipcMain.handle('app:save-filter-templates', async (_event, templates: FilterTemplate[]) => configStore.saveFilterTemplates(templates));
   ipcMain.handle('app:resolve-version', async (_event, gameId: string) => {
     try {
       const activeConnector = await getOperationalConnector();
@@ -497,9 +535,11 @@ function registerIpc(): void {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+  app.setAppUserModelId('com.q1.ops-report-generator');
   vault = new SessionVault();
   await vault.restore();
   registerIpc();
+  createTray();
   await createMainWindow();
   if (captureProbe) {
     void runCaptureProbe(captureProbe).catch((error) => {
@@ -508,7 +548,8 @@ app.whenReady().then(async () => {
       }
     });
   }
-  app.on('activate', () => { if (!mainWindow) void createMainWindow(); });
+  app.on('activate', () => { void showMainWindow(); });
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('before-quit', () => { isExplicitQuit = true; });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { MediaRule, MetricKey, PidDirectoryEntry, ProjectConfig, RealtimeConfig, RealtimeMetricKey, RealtimeQuery, ReportQuery, SheetConfig, VersionCandidate } from '../shared/contracts';
+import type { FilterTemplate, MediaRule, MetricKey, PidDirectoryEntry, ProjectConfig, RealtimeConfig, RealtimeMetricKey, RealtimeQuery, ReportQuery, SheetConfig, VersionCandidate } from '../shared/contracts';
 import { createDefaultProjectConfig } from '../shared/defaults';
 import { METRICS, metricByKey } from '../shared/metrics';
 import { REALTIME_METRICS, realtimeMetricByKey } from '../shared/realtime-metrics';
@@ -52,6 +52,10 @@ export default function App() {
   const [incomeType, setIncomeType] = useState<'amount' | 'realamount'>('amount');
   const [includeReattribution, setIncludeReattribution] = useState(false);
   const [includePitcherDetails, setIncludePitcherDetails] = useState(false);
+  const [filterTemplates, setFilterTemplates] = useState<FilterTemplate[]>([]);
+  const [selectedFilterTemplateId, setSelectedFilterTemplateId] = useState('');
+  const [filterTemplateName, setFilterTemplateName] = useState('');
+  const [filterTemplatePendingDelete, setFilterTemplatePendingDelete] = useState<FilterTemplate | null>(null);
   const [newBidCode, setNewBidCode] = useState('');
   const [newBidName, setNewBidName] = useState('');
   const [newPitcherCode, setNewPitcherCode] = useState('');
@@ -78,6 +82,7 @@ export default function App() {
       if (loaded.currentGameVersionId) setVersion({ key: loaded.currentGameVersionId, name: '已保存版本', gameId: loaded.gameId, flag: 1 });
       if (loaded.realtimeConfig.currentGameVersionId) setRealtimeVersion({ key: loaded.realtimeConfig.currentGameVersionId, name: '已保存版本', gameId: loaded.realtimeConfig.gameId, flag: 1 });
     });
+    void window.desktopApi.loadFilterTemplates().then(setFilterTemplates);
     const stopProgress = window.desktopApi.onProgress((progress) => {
       setBusy(progress.phase !== 'done');
       setProgress(progress);
@@ -120,6 +125,68 @@ export default function App() {
     setPidValidation(null);
     setPidValidationSnapshot(null);
     setDirectory([]);
+  }
+
+  async function applyFilterTemplate(template: FilterTemplate) {
+    setError('');
+    const requestId = ++projectLoadSequence.current;
+    setGameId(template.gameId);
+    setVersion(null);
+    setVersionCandidates([]);
+    setPidInput(template.pidInput);
+    setPidValidation(null);
+    setPidValidationSnapshot(null);
+    setDirectory([]);
+    const loaded = await window.desktopApi.loadConfig(template.gameId);
+    if (requestId !== projectLoadSequence.current) return;
+    setConfig({ ...loaded, gameId: template.gameId, currentGameVersionId: template.gameVersionId });
+    setVersion({ key: template.gameVersionId, name: '模板保存版本', gameId: template.gameId, flag: 1 });
+    setIncomeType(template.incomeType);
+    setIncludeReattribution(template.includeReattribution);
+    setIncludePitcherDetails(template.includePitcherDetails);
+    setStatus(`已应用筛选模板“${template.name}”，请先重新校验 PID。`);
+  }
+
+  async function saveFilterTemplate() {
+    setError('');
+    const name = filterTemplateName.trim();
+    if (!name) { setError('请填写筛选模板名称。'); return; }
+    if (!/^\d{4,}$/u.test(gameId)) { setError('保存模板前请填写数字 gameid。'); return; }
+    if (!version || version.gameId !== gameId) { setError('保存模板前请先读取当前有效版本。'); return; }
+    if (parsePidInput(pidInput).length === 0) { setError('保存模板前至少填写一个数字 PID。'); return; }
+    if (filterTemplates.some((template) => template.name === name)) { setError('已存在同名筛选模板，请换一个名称。'); return; }
+    const template: FilterTemplate = {
+      id: globalThis.crypto.randomUUID?.() ?? `filter-template-${Date.now()}`,
+      name,
+      gameId,
+      gameVersionId: version.key,
+      pidInput: pidInput.trim(),
+      incomeType,
+      includeReattribution,
+      includePitcherDetails,
+    };
+    const saved = await window.desktopApi.saveFilterTemplates([...filterTemplates, template]);
+    setFilterTemplates(saved);
+    setSelectedFilterTemplateId(template.id);
+    setFilterTemplateName('');
+    setStatus(`筛选模板“${template.name}”已保存。`);
+  }
+
+  function deleteSelectedFilterTemplate() {
+    const template = filterTemplates.find((item) => item.id === selectedFilterTemplateId);
+    if (!template) { setError('请先选择要删除的筛选模板。'); return; }
+    setError('');
+    setFilterTemplatePendingDelete(template);
+  }
+
+  async function confirmDeleteFilterTemplate() {
+    const template = filterTemplatePendingDelete;
+    if (!template) return;
+    const saved = await window.desktopApi.saveFilterTemplates(filterTemplates.filter((item) => item.id !== template.id));
+    setFilterTemplates(saved);
+    setSelectedFilterTemplateId('');
+    setFilterTemplatePendingDelete(null);
+    setStatus(`筛选模板“${template.name}”已删除。`);
   }
 
   function updateGameId(value: string) {
@@ -484,9 +551,15 @@ export default function App() {
 
       <main className="content">
         {tab === 'generate' && <>
-          <section className="card hero-card">
-            <div className="section-title"><div><h2>快速生成</h2><p>普通用户只需登录、填写 gameid、PID 和日期，即可生成固定格式 Excel。</p></div><div className="section-actions"><span className="beijing">统一使用北京时间</span><button className="secondary" onClick={() => setConfigModal('report')}>报表配置</button></div></div>
-            <div className="form-grid four">
+           <section className="card hero-card">
+             <div className="section-title"><div><h2>快速生成</h2><p>普通用户只需登录、填写 gameid、PID 和日期，即可生成固定格式 Excel。</p></div><div className="section-actions"><span className="beijing">统一使用北京时间</span><button className="secondary" onClick={() => setConfigModal('report')}>报表配置</button></div></div>
+             <div className="template-grid">
+               <label>筛选模板<select value={selectedFilterTemplateId} onChange={(event) => { const id = event.target.value; setSelectedFilterTemplateId(id); const template = filterTemplates.find((item) => item.id === id); if (template) void applyFilterTemplate(template); }}><option value="">选择模板后立即带入配置</option>{filterTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}（{template.gameId} / {template.gameVersionId}）</option>)}</select><small>会带入 gameid、版本、PID、收入类型和查询选项。</small></label>
+               <div className="field-button"><span>模板操作</span><div className="template-actions"><button className="ghost" onClick={() => void deleteSelectedFilterTemplate()} disabled={!selectedFilterTemplateId || busy}>删除所选模板</button></div></div>
+               <label>新模板名称<input value={filterTemplateName} onChange={(event) => setFilterTemplateName(event.target.value)} placeholder="例如：国服安卓收入" /></label>
+               <div className="field-button"><span>保存当前筛选</span><div className="template-actions"><button className="secondary" onClick={() => void saveFilterTemplate()} disabled={busy}>保存为模板</button></div></div>
+             </div>
+             <div className="form-grid four">
               <label>gameid<input value={gameId} onChange={(event) => updateGameId(event.target.value)} placeholder="例如：2170" /></label>
               <div className="field-button"><span>当前有效版本</span><div className="readonly-field">{version?.name ?? '尚未读取'}</div><button className="inline" onClick={() => void resolveVersion()} disabled={busy}>自动读取</button></div>
               <label>收入类型<select value={incomeType} onChange={(event) => setIncomeType(event.target.value as 'amount' | 'realamount')}><option value="amount">收入</option><option value="realamount">实收</option></select></label>
@@ -562,7 +635,7 @@ export default function App() {
          </section>
        </div>}
 
-       {configModal === 'realtime' && <div className={`config-modal-backdrop${browserOpen ? ' browser-open' : ''}`}>
+        {configModal === 'realtime' && <div className={`config-modal-backdrop${browserOpen ? ' browser-open' : ''}`}>
          <section className="config-modal realtime-config-modal" role="dialog" aria-modal="true" aria-labelledby="realtime-config-title">
            <div className="config-modal-header"><div><h2 id="realtime-config-title">实时播报配置</h2><p>设置标题格式、播报指标和显示顺序。不会影响 Excel 报表的任何设置。</p></div><button className="ghost modal-close" onClick={() => setConfigModal(null)} aria-label="关闭实时播报配置">×</button></div>
            <div className="config-modal-body realtime-layout">
@@ -570,10 +643,18 @@ export default function App() {
              <div className="metric-panel"><label>标题格式<input value={realtime.titleTemplate} onChange={(event) => updateRealtimeConfig((current) => ({ ...current, titleTemplate: event.target.value }))} placeholder="【{pidName}】" /><small>可用变量：{'{pidName}'}（后台中文名）、{'{pid}'}（数字 ID）</small></label><div className="selected-order"><h3>当前顺序</h3>{realtime.metricOrder.length > 0 ? realtime.metricOrder.map((key, index) => <div className="order-row" key={key}><span>{index + 1}. {realtimeMetricByKey.get(key as RealtimeMetricKey)?.label ?? key}</span><span><button onClick={() => updateRealtimeConfig((current) => ({ ...current, metricOrder: moveItem(current.metricOrder, index, -1) }))}>↑</button><button onClick={() => updateRealtimeConfig((current) => ({ ...current, metricOrder: moveItem(current.metricOrder, index, 1) }))}>↓</button></span></div>) : <div className="empty-state">尚未选择指标，生成后只显示标题。</div>}</div></div>
            </div>
            <div className="config-modal-footer"><button className="ghost" onClick={() => setConfigModal(null)}>取消</button><button className="primary small" onClick={() => void saveModalConfig('实时播报配置已保存。')}>保存配置</button></div>
-         </section>
-       </div>}
+          </section>
+        </div>}
 
-       {browserOpen && <aside className="browser-chrome">
+        {filterTemplatePendingDelete && <div className={`config-modal-backdrop${browserOpen ? ' browser-open' : ''}`}>
+          <section className="config-modal filter-template-delete-modal" role="dialog" aria-modal="true" aria-labelledby="filter-template-delete-title">
+            <div className="config-modal-header"><div><h2 id="filter-template-delete-title">删除筛选模板</h2><p>此操作只会删除本机保存的模板，不会删除项目配置或已生成的报表。</p></div><button className="ghost modal-close" onClick={() => setFilterTemplatePendingDelete(null)} aria-label="关闭删除筛选模板确认">×</button></div>
+            <div className="config-modal-body"><p className="filter-template-delete-message">确定删除筛选模板“<strong>{filterTemplatePendingDelete.name}</strong>”吗？</p></div>
+            <div className="config-modal-footer"><button className="ghost" onClick={() => setFilterTemplatePendingDelete(null)}>取消</button><button className="primary small danger" onClick={() => void confirmDeleteFilterTemplate()}>确认删除</button></div>
+          </section>
+        </div>}
+
+        {browserOpen && <aside className="browser-chrome">
         <div className="browser-tabs">
           {browserState.tabs.map((browserTab) => <div className={`browser-tab${browserTab.active ? ' active' : ''}`} key={browserTab.id} title={browserTab.url}>
             <button className="browser-tab-select" onClick={() => void selectBrowserTab(browserTab.id)}><span className="browser-tab-title">{browserTab.title || '新标签页'}</span></button>

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { ProjectConfig, RealtimeQuery, ReportQuery } from '../shared/contracts';
+import type { FilterTemplate, ProjectConfig, RealtimeQuery, ReportQuery } from '../shared/contracts';
 
 type BrowserTabState = { id: string; title: string; url: string; active: boolean };
 type BrowserState = { open: boolean; tabs: BrowserTabState[] };
@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
   clearSession: (): Promise<boolean> => ipcRenderer.invoke('app:clear-session'),
   loadConfig: (gameId?: string): Promise<ProjectConfig> => ipcRenderer.invoke('app:load-config', gameId),
   saveConfig: (config: ProjectConfig, gameId?: string): Promise<ProjectConfig> => ipcRenderer.invoke('app:save-config', config, gameId),
+  loadFilterTemplates: (): Promise<FilterTemplate[]> => ipcRenderer.invoke('app:load-filter-templates'),
+  saveFilterTemplates: (templates: FilterTemplate[]): Promise<FilterTemplate[]> => ipcRenderer.invoke('app:save-filter-templates', templates),
   resolveVersion: (gameId: string): Promise<unknown> => ipcRenderer.invoke('app:resolve-version', gameId),
   lookupPids: (gameId: string, versionId: string, input: string, config: ProjectConfig): Promise<unknown> => ipcRenderer.invoke('app:lookup-pids', gameId, versionId, input, config),
   generate: (query: ReportQuery, config: ProjectConfig): Promise<unknown> => ipcRenderer.invoke('app:generate', query, config),

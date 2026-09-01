@@ -1,4 +1,4 @@
-import type { ProjectConfig, RealtimeQuery, ReportQuery } from '../shared/contracts';
+import type { FilterTemplate, ProjectConfig, RealtimeQuery, ReportQuery } from '../shared/contracts';
 
 type BrowserTabState = { id: string; title: string; url: string; active: boolean };
 type BrowserState = { open: boolean; tabs: BrowserTabState[] };
@@ -17,6 +17,8 @@ interface DesktopApi {
   clearSession(): Promise<boolean>;
   loadConfig(gameId?: string): Promise<ProjectConfig>;
   saveConfig(config: ProjectConfig, gameId?: string): Promise<ProjectConfig>;
+  loadFilterTemplates(): Promise<FilterTemplate[]>;
+  saveFilterTemplates(templates: FilterTemplate[]): Promise<FilterTemplate[]>;
   resolveVersion(gameId: string): Promise<unknown>;
   lookupPids(gameId: string, versionId: string, input: string, config: ProjectConfig): Promise<unknown>;
   generate(query: ReportQuery, config: ProjectConfig): Promise<unknown>;
