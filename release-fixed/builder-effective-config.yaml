@@ -1,0 +1,23 @@
+directories:
+  output: release-fixed
+  buildResources: build
+appId: com.q1.ops-report-generator
+productName: 后台数据报表生成器
+icon: build/icon.ico
+files:
+  - filter:
+      - out/**/*
+      - package.json
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+asar: true
+win:
+  target:
+    - target: dir
+      arch:
+        - x64
+  artifactName: 后台数据报表生成器-${version}-${arch}.${ext}
+electronLanguages:
+  - zh-CN
+electronVersion: 37.10.3

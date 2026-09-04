@@ -129,6 +129,41 @@ describe('workbook export', () => {
     expect(source?.rowCount).toBe(rows.length + pidSummaryRows.length + 3);
   });
 
+  it('uses separately queried pitcher rows only for the pitcher sheet', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ops-report-generator-'));
+    temporaryDirectories.push(directory);
+    const output = join(directory, 'separate-pitcher-query.xlsx');
+    const config = createDefaultProjectConfig();
+    const base: RawAdRow = {
+      media: '头条', accountId: 'account', accountName: 'account', radid: 'tt_total_jh_agency_total',
+      operatingSystem: '安卓', pid: '2170304', pidName: '总查询渠道', packageName: 'APK',
+      bidCode: 'jh', bidName: '激活', tapSegment: 'main', spend: 100, impressions: 1000, clicks: 100,
+      installs: 10, activatedDevices: 10, sameDayPayingDevices: 1, sameDayPayment: 5, loginDevices: 8,
+      registrationDevices: 7, payingDevices: 2, payment: 20, registrationCost: 10, loginCost: 12.5,
+      roi: 0.2, firstDayRoi: 0.05, firstDayArppu: 5, arppu: 10, date: '2026-08-28',
+      isReattribution: false, source: 'structured',
+    };
+    const queriedPitcherRow = { ...base, radid: 'tt_queried_jh_agency_pitcher', pidName: '投手筛选结果', spend: 30 };
+    await writeWorkbook([base], config, output, undefined, [], [], {
+      includePitcherDetails: true,
+      detailRows: [base],
+      pitcherDetailRows: [queriedPitcherRow],
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(output);
+    const pitcher = workbook.getWorksheet('分投手明细');
+    const source = workbook.getWorksheet('源数据');
+    expect(pitcher).toBeDefined();
+    expect(source).toBeDefined();
+    const pitcherLabels = Array.from({ length: pitcher!.rowCount }, (_, index) => pitcher!.getCell(index + 1, 1).text);
+    expect(pitcherLabels).toContain('投手：queried（queried）');
+    expect(pitcherLabels).not.toContain('投手：total（total）');
+    const sourceRadids = Array.from({ length: source!.rowCount }, (_, index) => source!.getCell(index + 1, 13).text);
+    expect(sourceRadids).toContain('tt_total_jh_agency_total');
+    expect(sourceRadids).not.toContain('tt_queried_jh_agency_pitcher');
+  });
+
   it('organizes pitcher details by pitcher, then media, with a media summary before bid details', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'ops-report-generator-'));
     temporaryDirectories.push(directory);
@@ -326,7 +361,7 @@ describe('workbook export', () => {
     const overall = workbook.getWorksheet('媒体数据汇总');
     const toutiao = workbook.getWorksheet('媒体数据汇总-头条');
     const bid = workbook.getWorksheet('头条出价方式对比');
-    const tap = workbook.getWorksheet('媒体数据汇总-TAP');
+    const tap = workbook.getWorksheet('媒体数据汇总-TapTap');
     expect(overall).toBeDefined();
     expect(toutiao).toBeDefined();
     expect(bid).toBeDefined();
@@ -369,10 +404,10 @@ describe('workbook export', () => {
     expect(conditionalFormattings.some((item) => item.rules.some((rule) => rule.type === 'dataBar'))).toBe(true);
 
     const tapTitles = Array.from({ length: tap!.rowCount }, (_, index) => String(tap!.getCell(index + 1, 1).text));
-    expect(tapTitles).toContain('TAP主站 · 抖小 · 安卓');
-    expect(tapTitles).toContain('TAP ADN/联盟 · 抖小 · 安卓');
-    expect(tapTitles).toContain('TAP主站数据汇总');
-    expect(tapTitles).toContain('TAP ADN/联盟数据汇总');
+    expect(tapTitles).toContain('TapTap主站 · 抖小 · 安卓');
+    expect(tapTitles).toContain('TapTap ADN/联盟 · 抖小 · 安卓');
+    expect(tapTitles).toContain('TapTap主站数据汇总');
+    expect(tapTitles).toContain('TapTap ADN/联盟数据汇总');
   });
 
   it('orders overall media-channel-system summaries by configured media priority', async () => {

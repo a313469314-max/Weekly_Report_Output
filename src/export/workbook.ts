@@ -39,6 +39,7 @@ type WorkbookOptions = {
   includePitcherDetails?: boolean;
   detailRows?: RawAdRow[];
   pidSummaryRows?: RawAdRow[];
+  pitcherDetailRows?: RawAdRow[];
 };
 
 function uniqueMetrics(config: SheetConfig): SheetConfig['metricOrder'] {
@@ -467,7 +468,7 @@ const sourceColumns: SourceColumn[] = [
   { header: 'RADID', width: 36, value: (row) => row.radid },
   { header: '出价代码', width: 14, value: (row) => row.bidCode },
   { header: '出价方式', width: 16, value: (row) => row.bidName },
-  { header: 'TAP分组', width: 16, value: (row) => row.tapSegment === 'adn' ? 'TAP ADN/联盟' : 'TAP主站' },
+  { header: 'TapTap分组', width: 16, value: (row) => row.tapSegment === 'adn' ? 'TapTap ADN/联盟' : 'TapTap主站' },
   { header: '重归因', width: 10, value: (row) => row.isReattribution ? '是' : '否' },
   { header: '消耗', width: 14, value: (row) => sourceMetric(row, 'spend', 'spend'), format: 'currency' },
   { header: '展示', width: 12, value: (row) => sourceMetric(row, 'impressions', 'impressions'), format: 'number' },
@@ -559,6 +560,9 @@ export async function writeWorkbook(rows: RawAdRow[], config: ProjectConfig, out
   const reportPidSummaryRows = enrichedPidSummaryRows.filter((row) => !detailPidDates.has(pidDateKey(row)));
   const mixed = materializeMixedPidRows(detailRows, enrichedPidSummaryRows);
   const reportRows = mixed.rows;
+  const pitcherRows = options.pitcherDetailRows
+    ? materializeMixedPidRows(options.pitcherDetailRows).rows
+    : reportRows;
   const detailOverallRows = reportRows.filter((row) => !row.isMixedSystemBreakdown && !row.isCrossSystemSummary);
   const overallRows = detailOverallRows.length > 0 ? detailOverallRows : reportPidSummaryRows;
   const categoryRows = reportRows.filter((row) => !row.isCrossSystemSummary);
@@ -581,12 +585,12 @@ export async function writeWorkbook(rows: RawAdRow[], config: ProjectConfig, out
     } else if (sheetConfig.kind === 'overall') {
       addOverallSummaryReport(sheet, reportRows, reportPidSummaryRows, sheetConfig);
     } else if (sheetConfig.kind === 'pitcher') {
-      addPitcherReport(sheet, categoryRows, sheetConfig, config);
+      addPitcherReport(sheet, pitcherRows.filter((row) => !row.isCrossSystemSummary), sheetConfig, config);
     } else if (sheetConfig.media === 'TapTap') {
       const scoped = categoryRows.filter((row) => row.media === 'TapTap');
-      addCategorizedReport(sheet, scoped.filter((row) => row.tapSegment === 'main'), sheetConfig, 'TAP主站');
+      addCategorizedReport(sheet, scoped.filter((row) => row.tapSegment === 'main'), sheetConfig, 'TapTap主站');
       sheet.addRow([]);
-      addCategorizedReport(sheet, scoped.filter((row) => row.tapSegment === 'adn'), sheetConfig, 'TAP ADN/联盟');
+      addCategorizedReport(sheet, scoped.filter((row) => row.tapSegment === 'adn'), sheetConfig, 'TapTap ADN/联盟');
     } else {
       const scoped = categoryRows.filter((row) => !sheetConfig.media || row.media === sheetConfig.media);
       addCategorizedReport(sheet, scoped, sheetConfig);

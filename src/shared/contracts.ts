@@ -102,7 +102,10 @@ export interface ProjectConfig {
   outputDirectory: string;
   fileNameRule: string;
   realtimeConfig: RealtimeConfig;
+  scheduledReports: ScheduledReport[];
 }
+
+export type ProjectConfigSection = 'basic' | 'pidCache' | 'mediaRules' | 'bidCodes' | 'pitcherNames';
 
 export interface RealtimeConfig {
   gameId: string;
@@ -113,8 +116,106 @@ export interface RealtimeConfig {
   paymentStatsEndDate: string;
   incomeType: IncomeType;
   includeReattribution: boolean;
+  pitcherFilters?: string[];
+  includePitcherDetails: boolean;
   titleTemplate: string;
   metricOrder: RealtimeMetricKey[];
+}
+
+export type DeliveryPlatform = 'dingtalk' | 'feishu';
+
+export interface DeliveryTarget {
+  id: string;
+  name: string;
+  platform: DeliveryPlatform;
+  enabled: boolean;
+  secretId: string;
+}
+
+export interface DeliveryTargetInput {
+  id?: string;
+  name: string;
+  platform: DeliveryPlatform;
+  enabled: boolean;
+  webhookUrl: string;
+  signingSecret: string;
+}
+
+export interface LoginCredentialInput {
+  username: string;
+  password: string;
+}
+
+export interface LoginCredentialStatus {
+  configured: boolean;
+  username: string;
+}
+
+export interface DingTalkLoginQrInput {
+  appKey: string;
+  appSecret: string;
+  robotCode: string;
+}
+
+export interface DingTalkLoginQrCredentials extends DingTalkLoginQrInput {
+  openConversationId: string;
+}
+
+export interface DingTalkLoginQrStatus {
+  configured: boolean;
+  groupBound: boolean;
+}
+
+export interface ScheduledReport {
+  id: string;
+  name: string;
+  enabled: boolean;
+  gameId: string;
+  gameVersionId: string;
+  pidInput: string;
+  incomeType: IncomeType;
+  includeReattribution: boolean;
+  pitcherFilters?: string[];
+  includePitcherDetails: boolean;
+  titleTemplate: string;
+  metricOrder: RealtimeMetricKey[];
+  scheduleMode?: ScheduledReportMode;
+  startDate?: string;
+  endDate?: string | null;
+  intervalMinutes?: number;
+  intervalEndTime?: string;
+  times: string[];
+  targetIds: string[];
+}
+
+export type ScheduledReportMode = 'fixed' | 'interval';
+
+export type ScheduledExecutionResult = 'running' | 'waiting_login' | 'success' | 'partial_failure' | 'failed' | 'unknown';
+
+export interface ScheduledExecutionRecord {
+  slotKey: string;
+  scheduleId: string;
+  scheduleName: string;
+  date: string;
+  time: string;
+  result: ScheduledExecutionResult;
+  code: string;
+  occurredAt: string;
+}
+
+export type TaskQueueKind = 'report' | 'realtime' | 'scheduled' | 'preview' | 'query';
+
+export type TaskQueueStatus = 'queued' | 'running' | 'success' | 'failed' | 'cancelled';
+
+export interface TaskQueueItem {
+  id: string;
+  name: string;
+  kind: TaskQueueKind;
+  status: TaskQueueStatus;
+  message: string;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
 }
 
 export interface ReportQuery {
@@ -126,6 +227,7 @@ export interface ReportQuery {
   paymentStatsEndDate: string;
   incomeType: IncomeType;
   includeReattribution: boolean;
+  pitcherFilters?: string[];
   includePitcherDetails: boolean;
 }
 
@@ -137,6 +239,7 @@ export interface FilterTemplate {
   pidInput: string;
   incomeType: IncomeType;
   includeReattribution: boolean;
+  pitcherFilters?: string[];
   includePitcherDetails: boolean;
 }
 
@@ -149,6 +252,8 @@ export interface RealtimeQuery {
   paymentStatsEndDate: string;
   incomeType: IncomeType;
   includeReattribution: boolean;
+  pitcherFilters?: string[];
+  includePitcherDetails: boolean;
   titleTemplate: string;
   metricOrder: RealtimeMetricKey[];
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRealtimeText } from '../src/engine/realtime';
+import { buildRealtimeBroadcastText, buildRealtimeText } from '../src/engine/realtime';
 import type { RawAdRow } from '../src/shared/contracts';
 
 const row = (overrides: Partial<RawAdRow> = {}): RawAdRow => ({
@@ -64,5 +64,47 @@ describe('realtime broadcast text', () => {
       pids: ['2170304'], pidNames: { '2170304': '代号弹球王国-微小' }, titleTemplate: '【{pidName}】', metricOrder: ['spend', 'activatedDevices', 'activationCost'],
     });
     expect(text).toBe('【代号弹球王国-微小】\n消耗：150\n激活数：17\n激活成本：8.82');
+  });
+
+  it('separates multiple PID blocks with a blank line', () => {
+    const text = buildRealtimeText([
+      row({ pid: '2170304', pidName: '代号弹球王国-A包' }),
+      row({ pid: '2170305', pidName: '代号弹球王国-B包', spend: 200, activatedDevices: 20 }),
+    ], {
+      pids: ['2170304', '2170305'],
+      pidNames: { '2170304': '代号弹球王国-A包', '2170305': '代号弹球王国-B包' },
+      titleTemplate: '【{pidName}】',
+      metricOrder: ['spend', 'activatedDevices'],
+    });
+    expect(text).toBe([
+      '【代号弹球王国-A包】',
+      '消耗：100',
+      '激活数：10',
+      '',
+      '【代号弹球王国-B包】',
+      '消耗：200',
+      '激活数：20',
+    ].join('\n'));
+  });
+
+  it('places total data before each requested pitcher detail and any warnings', () => {
+    expect(buildRealtimeBroadcastText('【所有投手合计】\n消耗：300', [
+      { pitcherFilter: 'kz', text: '【PID A】\n消耗：100' },
+      { pitcherFilter: 'fz', text: '【PID A】\n消耗：200' },
+    ], ['投手“abc”没有返回符合当前条件的分投手明细，已跳过。'])).toBe([
+      '【所有投手合计】',
+      '消耗：300',
+      '',
+      '【投手：kz】',
+      '【PID A】',
+      '消耗：100',
+      '',
+      '【投手：fz】',
+      '【PID A】',
+      '消耗：200',
+      '',
+      '提示：',
+      '投手“abc”没有返回符合当前条件的分投手明细，已跳过。',
+    ].join('\n'));
   });
 });

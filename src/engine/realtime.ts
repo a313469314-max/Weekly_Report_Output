@@ -10,6 +10,11 @@ export interface RealtimeTextOptions {
   metricOrder: RealtimeMetricKey[];
 }
 
+export interface RealtimePitcherDetailText {
+  pitcherFilter: string;
+  text: string;
+}
+
 function calculateRealtimeMetric(metric: RealtimeMetricKey, totals: AggregateTotals): number | null {
   if (metric === 'activationLoginRate') return calculateMetric('activationLoginRate', totals);
   if (metric === 'loginPayRate') return totals.loginDevices === 0 ? 0 : totals.payingDevices / totals.loginDevices;
@@ -44,4 +49,13 @@ export function buildRealtimeText(rows: RawAdRow[], options: RealtimeTextOptions
     const lines = metrics.map((metric) => `${realtimeMetricByKey.get(metric)?.label ?? metric}：${formatMetric(metric, calculateRealtimeMetric(metric, group.totals))}`);
     return [title, ...lines].join('\n');
   }).join('\n\n');
+}
+
+export function buildRealtimeBroadcastText(totalText: string, pitcherDetails: RealtimePitcherDetailText[] = [], warnings: string[] = []): string {
+  const sections = [
+    totalText,
+    ...pitcherDetails.map((detail) => `【投手：${detail.pitcherFilter}】\n${detail.text}`),
+  ];
+  if (warnings.length > 0) sections.push(`提示：\n${warnings.join('\n')}`);
+  return sections.filter(Boolean).join('\n\n');
 }

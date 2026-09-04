@@ -54,7 +54,7 @@ export function createDefaultProjectConfig(): ProjectConfig {
       sheet('qq', '媒体数据汇总-广点通', 'media', '广点通'),
       sheet('qq-bid', '广点通出价方式对比', 'bid', '广点通'),
       sheet('bili', '媒体数据汇总-B站', 'media', 'B站'),
-      sheet('tap', '媒体数据汇总-TAP', 'media', 'TapTap'),
+      sheet('tap', '媒体数据汇总-TapTap', 'media', 'TapTap'),
       sheet('xhs', '媒体数据汇总-小红书', 'media', '小红书'),
       sheet('ks', '媒体数据汇总-快手', 'media', '快手'),
       sheet('bd', '媒体数据汇总-百度', 'media', '百度'),
@@ -73,8 +73,11 @@ export function createDefaultProjectConfig(): ProjectConfig {
       paymentStatsEndDate: today,
       incomeType: 'amount',
       includeReattribution: false,
+      pitcherFilters: [],
+      includePitcherDetails: false,
       titleTemplate: '【{pidName}】',
       metricOrder: [...DEFAULT_REALTIME_METRICS],
     },
+    scheduledReports: [],
   };
 }

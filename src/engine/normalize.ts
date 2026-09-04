@@ -125,7 +125,7 @@ export function normalizeStructuredRows(
     const bidCode = radid.split('_')[2] ?? '';
     const bidName = config.bidCodeMap[bidCode] ?? (bidCode || '未识别');
     const tapAdnText = `${pidName} ${radid} ${accountName}`.toLowerCase();
-    const tapSegment = config.tapAdnKeywords.some((keyword) => keyword.trim() && tapAdnText.includes(keyword.trim().toLowerCase())) ? 'adn' : 'main';
+    const tapSegment = media === 'TapTap' && config.tapAdnKeywords.some((keyword) => keyword.trim() && tapAdnText.includes(keyword.trim().toLowerCase())) ? 'adn' : 'main';
     if (!media && !options.allowUnclassified) {
       issues.push({ level: 'warning', code: 'unknown_media', message: '发现无法识别的媒体，已忽略对应数据行。' });
       continue;

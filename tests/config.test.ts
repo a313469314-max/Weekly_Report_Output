@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDefaultProjectConfig, PACKAGE_OPTIONS } from '../src/shared/defaults';
 import { normalizeProjectConfig } from '../src/shared/config';
-import { migrateStoredProjectConfig, projectConfigForGame } from '../src/main/config-store';
+import { mergeProjectConfigSection, migrateStoredProjectConfig, projectConfigForGame, scheduledReportsFromDocument } from '../src/main/config-store';
 
 describe('project configuration', () => {
   it('keeps fixed default sheet order and removes obsolete exclusion switches', () => {
@@ -13,7 +13,7 @@ describe('project configuration', () => {
       '媒体数据汇总-广点通',
       '广点通出价方式对比',
       '媒体数据汇总-B站',
-      '媒体数据汇总-TAP',
+      '媒体数据汇总-TapTap',
       '媒体数据汇总-小红书',
       '媒体数据汇总-快手',
       '媒体数据汇总-百度',
@@ -51,6 +51,7 @@ describe('project configuration', () => {
     expect(config.realtimeConfig.metricOrder).toEqual([
       'spend', 'activatedDevices', 'activationCost', 'loginDevices', 'loginCost', 'activationLoginRate', 'payingDevices', 'loginPayRate', 'sameDayPayingCost', 'firstDayRoi',
     ]);
+    expect(config.realtimeConfig.includePitcherDetails).toBe(false);
   });
 
   it('keeps realtime metrics separate from Excel metrics', () => {
@@ -58,10 +59,11 @@ describe('project configuration', () => {
     const config = normalizeProjectConfig({
       ...source,
       defaultMetrics: ['roi'],
-      realtimeConfig: { ...source.realtimeConfig, metricOrder: ['loginDevices', 'not-a-metric', 'loginDevices', 'spend'] },
+      realtimeConfig: { ...source.realtimeConfig, includePitcherDetails: true, metricOrder: ['loginDevices', 'not-a-metric', 'loginDevices', 'spend'] },
     });
     expect(config.defaultMetrics).toEqual(['roi']);
     expect(config.realtimeConfig.metricOrder).toEqual(['loginDevices', 'spend']);
+    expect(config.realtimeConfig.includePitcherDetails).toBe(true);
   });
 
   it('adds the new pitcher sheet to existing project settings and preserves case-sensitive mappings', () => {
@@ -94,7 +96,61 @@ describe('project configuration', () => {
     expect(projectConfigForGame(result.document, '2172').fileNameRule).toBe(createDefaultProjectConfig().fileNameRule);
   });
 
-  it('keeps global filter templates with their saved game version during migration', () => {
+  it('saves only the selected settings card without writing other pending changes', () => {
+    const saved = {
+      ...createDefaultProjectConfig(),
+      gameId: '2170',
+      fileNameRule: '已保存的文件名',
+      bidCodeMap: { old: '已保存出价' },
+    };
+    const updated = {
+      ...saved,
+      fileNameRule: '新的文件名',
+      bidCodeMap: { new: '未保存出价' },
+      mediaRules: saved.mediaRules.map((rule, index) => index === 0 ? { ...rule, aliases: ['未保存媒体别名'] } : rule),
+    };
+
+    const result = mergeProjectConfigSection(saved, updated, 'basic');
+
+    expect(result.fileNameRule).toBe('新的文件名');
+    expect(result.bidCodeMap).toEqual({ old: '已保存出价' });
+    expect(result.mediaRules).toEqual(saved.mediaRules);
+  });
+
+  it('lists scheduled reports from every project without changing project ownership', () => {
+    const report = (id: string, gameId: string) => ({
+      id,
+      name: `任务-${id}`,
+      enabled: true,
+      gameId,
+      gameVersionId: 'version-a',
+      pidInput: `${gameId}0304`,
+      incomeType: 'amount' as const,
+      includeReattribution: false,
+      includePitcherDetails: false,
+      titleTemplate: '【{pidName}】',
+      metricOrder: ['spend' as const],
+      times: ['20:00'],
+      targetIds: ['target-a'],
+    });
+    const first = { ...createDefaultProjectConfig(), gameId: '2170', scheduledReports: [report('schedule-a', '2170')] };
+    const second = { ...createDefaultProjectConfig(), gameId: '2171', scheduledReports: [report('schedule-b', '2171')] };
+    const result = migrateStoredProjectConfig({
+      version: 4,
+      activeGameId: '2170',
+      projects: { '2170': first, '2171': second },
+      filterTemplates: [],
+      deliveryTargets: [],
+      scheduledExecutionLedger: {},
+    });
+
+    expect(scheduledReportsFromDocument(result.document).map((item) => `${item.gameId}:${item.id}`)).toEqual([
+      '2170:schedule-a',
+      '2171:schedule-b',
+    ]);
+  });
+
+  it('migrates global filter templates with their saved game version to the scheduled-report config format', () => {
     const project = { ...createDefaultProjectConfig(), gameId: '2170' };
     const result = migrateStoredProjectConfig({
       version: 3,
@@ -108,11 +164,12 @@ describe('project configuration', () => {
         pidInput: '2170405, 2170304',
         incomeType: 'amount',
         includeReattribution: false,
+        pitcherFilters: ['投手A', ' 投手A '],
         includePitcherDetails: true,
       }],
     });
 
-    expect(result.migrated).toBe(false);
+    expect(result.migrated).toBe(true);
     expect(result.document.filterTemplates).toEqual([{
       id: 'template-1',
       name: '国服安卓收入',
@@ -121,9 +178,67 @@ describe('project configuration', () => {
       pidInput: '2170405, 2170304',
       incomeType: 'amount',
       includeReattribution: false,
+      pitcherFilters: ['投手A'],
       includePitcherDetails: true,
     }]);
     expect(migrateStoredProjectConfig({ version: 2, activeGameId: '2170', projects: { '2170': project } }).document.filterTemplates).toEqual([]);
+  });
+
+  it('keeps independent scheduled-report snapshots and discards malformed plans', () => {
+    const source = createDefaultProjectConfig();
+    const config = normalizeProjectConfig({
+      ...source,
+      scheduledReports: [
+        {
+          id: 'schedule-a', name: '下午实时汇报', enabled: true, gameId: '2170', gameVersionId: 'version-a', pidInput: '2170304',
+          incomeType: 'amount', includeReattribution: false, pitcherFilters: [' 投手A ', '投手A'], includePitcherDetails: true, titleTemplate: '【{pidName}】', metricOrder: ['spend', 'not-a-metric', 'spend'],
+          times: ['20:00', '15:30', '15:30', 'invalid'], targetIds: ['target-a', 'target-a'],
+        },
+        {
+          id: 'schedule-invalid', name: '', enabled: true, gameId: '2170', gameVersionId: 'version-a', pidInput: '2170304',
+          incomeType: 'amount', includeReattribution: false, titleTemplate: '', metricOrder: [], times: ['15:30'], targetIds: ['target-a'],
+        },
+      ],
+    });
+    expect(config.scheduledReports).toEqual([{
+      id: 'schedule-a', name: '下午实时汇报', enabled: true, gameId: '2170', gameVersionId: 'version-a', pidInput: '2170304',
+      incomeType: 'amount', includeReattribution: false, pitcherFilters: ['投手A'], includePitcherDetails: true, titleTemplate: '【{pidName}】', metricOrder: ['spend'],
+      times: ['15:30', '20:00'], targetIds: ['target-a'],
+    }]);
+  });
+
+  it('keeps valid date-bounded interval plans and rejects invalid interval plans', () => {
+    const source = createDefaultProjectConfig();
+    const config = normalizeProjectConfig({
+      ...source,
+      scheduledReports: [
+        {
+          id: 'schedule-interval', name: '循环汇报', enabled: true, gameId: '2170', gameVersionId: 'version-a', pidInput: '2170304',
+          incomeType: 'amount', includeReattribution: false, titleTemplate: '【{pidName}】', metricOrder: ['spend'],
+          scheduleMode: 'interval', startDate: '2026-09-03', endDate: '2026-09-05', intervalMinutes: 30, intervalEndTime: '20:00', times: ['08:00'], targetIds: ['target-a'],
+        },
+        {
+          id: 'schedule-invalid-interval', name: '错误循环汇报', enabled: true, gameId: '2170', gameVersionId: 'version-a', pidInput: '2170304',
+          incomeType: 'amount', includeReattribution: false, titleTemplate: '【{pidName}】', metricOrder: ['spend'],
+          scheduleMode: 'interval', startDate: '2026-09-05', endDate: '2026-09-03', intervalMinutes: 0, intervalEndTime: '08:00', times: ['08:00'], targetIds: ['target-a'],
+        },
+        {
+          id: 'schedule-equal-time-interval', name: '相同时间循环汇报', enabled: true, gameId: '2170', gameVersionId: 'version-a', pidInput: '2170304',
+          incomeType: 'amount', includeReattribution: false, titleTemplate: '【{pidName}】', metricOrder: ['spend'],
+          scheduleMode: 'interval', startDate: '2026-09-03', endDate: null, intervalMinutes: 30, intervalEndTime: '08:00', times: ['08:00'], targetIds: ['target-a'],
+        },
+        {
+          id: 'schedule-reversed-time-interval', name: '倒置时间循环汇报', enabled: true, gameId: '2170', gameVersionId: 'version-a', pidInput: '2170304',
+          incomeType: 'amount', includeReattribution: false, titleTemplate: '【{pidName}】', metricOrder: ['spend'],
+          scheduleMode: 'interval', startDate: '2026-09-03', endDate: null, intervalMinutes: 30, intervalEndTime: '07:59', times: ['08:00'], targetIds: ['target-a'],
+        },
+      ],
+    });
+    expect(config.scheduledReports).toEqual([{
+      id: 'schedule-interval', name: '循环汇报', enabled: true, gameId: '2170', gameVersionId: 'version-a', pidInput: '2170304',
+      incomeType: 'amount', includeReattribution: false, pitcherFilters: [], includePitcherDetails: false, titleTemplate: '【{pidName}】', metricOrder: ['spend'],
+      scheduleMode: 'interval', startDate: '2026-09-03', endDate: '2026-09-05', intervalMinutes: 30, intervalEndTime: '20:00', times: ['08:00'], targetIds: ['target-a'],
+    }]);
   });
 
   it('refreshes the realtime payment statistics end date when loading a saved project', () => {

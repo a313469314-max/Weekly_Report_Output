@@ -3,11 +3,13 @@ import type { MetricKey, PidDirectoryEntry, ProjectConfig, RawAdRow, ReportData,
 import { normalizeStructuredRows, type BackendColumn, type BackendRow } from '../engine/normalize';
 import { classifyDeliveryType, inferPackageName, inferPidClassification, isMixedPidName } from '../domain/pid';
 import { DiagnosticLogger } from './diagnostic-log';
+import { findDingTalkQrImageRect } from './dingtalk-qr-image';
 
 const OPS_ORIGIN = 'https://ops.q1.com';
 export const DASHCARD_IDLE_WINDOW_MS = 2500;
 
-type ReportFrameControl = 'pid-filter' | 'pid-search' | 'pid-option' | 'pid-apply' | 'query'
+type ReportFrameControl = 'pid-filter' | 'pid-search' | 'pid-option' | 'pid-apply'
+  | 'pitcher-filter' | 'pitcher-search' | 'pitcher-option' | 'pitcher-apply' | 'query'
   | 'date-start' | 'date-end' | 'date-payment' | 'date-level' | 'date-previous' | 'date-next' | 'date-month-option' | 'date-option'
   | 'income-selector' | 'income-option';
 export const REPORT_FRAME_CLICK_MODES = ['web-contents', 'debugger'] as const;
@@ -22,6 +24,71 @@ export interface BrowserHost {
   isDestroyed(): boolean;
   focus(): void;
   loadURL(url: string): Promise<void>;
+}
+
+export interface LoginAttemptResult {
+  result: 'success' | 'needs_dingtalk' | 'failed';
+  code?: string;
+}
+
+export interface LoginPageContentState {
+  hasVisibleText: boolean;
+  interactiveElementCount: number;
+  visualElementCount: number;
+}
+
+export function hasVisibleLoginPageContent(state: LoginPageContentState): boolean {
+  return state.hasVisibleText || state.interactiveElementCount > 0 || state.visualElementCount > 0;
+}
+
+export function hasVisibleLoginScreenshotPixels(bitmap: Uint8Array): boolean {
+  const pixelStride = 4;
+  const sampleStride = pixelStride * 16;
+  let sampled = 0;
+  let nonWhite = 0;
+  for (let index = 0; index + pixelStride <= bitmap.length; index += sampleStride) {
+    sampled += 1;
+    const blue = bitmap[index] ?? 255;
+    const green = bitmap[index + 1] ?? 255;
+    const red = bitmap[index + 2] ?? 255;
+    const alpha = bitmap[index + 3] ?? 0;
+    if (alpha > 0 && (blue < 240 || green < 240 || red < 240)) nonWhite += 1;
+  }
+  return nonWhite >= 20 && nonWhite / Math.max(sampled, 1) >= 0.003;
+}
+
+export interface CapturedQrCode {
+  image: Buffer;
+}
+
+export interface DingTalkQrCandidate {
+  tagName: string;
+  className: string;
+  id: string;
+  alt: string;
+  backgroundImage?: string;
+  width: number;
+  height: number;
+}
+
+export function isLikelyDingTalkQrCandidate(candidate: DingTalkQrCandidate): boolean {
+  const isSquare = candidate.width >= 100
+    && candidate.height >= 100
+    && Math.abs(candidate.width - candidate.height) < Math.max(12, candidate.width * 0.18);
+  if (!isSquare) return false;
+  const hint = candidate.id + ' ' + candidate.className + ' ' + candidate.alt;
+  return /^(IMG|CANVAS)$/u.test(candidate.tagName)
+    || /二维码|qrcode|qr-code|qr_code/iu.test(hint)
+    || Boolean(candidate.backgroundImage && candidate.backgroundImage !== 'none');
+}
+
+interface DingTalkQrRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  viewportWidth: number;
+  viewportHeight: number;
 }
 
 interface ReportFrameControlPoint {
@@ -79,6 +146,31 @@ interface PidDialogOptionState {
   checkedMatchingPidOptions: number;
   checkedPidOptions: number;
   searchValueMatches: boolean;
+}
+
+interface PitcherDialogOptionState {
+  visiblePitcherOptions: number;
+  matchingPitcherOptions: number;
+  checkedMatchingPitcherOptions: number;
+  checkedPitcherOptions: number;
+  searchValueMatches: boolean;
+}
+
+export interface PitcherFilterSearchTarget {
+  searchValue: string;
+  optionValue: string;
+}
+
+export function pitcherFilterSearchTarget(value: string): PitcherFilterSearchTarget {
+  const normalized = value.trim().replaceAll('：', ':');
+  const separator = normalized.indexOf(':');
+  if (separator > 0) {
+    return {
+      searchValue: normalized.slice(0, separator).trim(),
+      optionValue: normalized.replace(/\s+/gu, ''),
+    };
+  }
+  return { searchValue: normalized, optionValue: `${normalized}:${normalized}` };
 }
 
 export interface PidSearchKeyEvent {
@@ -324,7 +416,34 @@ export function selectValidVersionCandidates(rows: Array<Record<string, unknown>
 }
 
 export class Q1Connector {
-  constructor(private readonly browser: BrowserHost, private readonly diagnostics = new DiagnosticLogger()) {}
+  private taskAbortSignal: AbortSignal | null = null;
+  private taskAbortListener: (() => void) | null = null;
+
+  constructor(private browser: BrowserHost, private readonly diagnostics = new DiagnosticLogger()) {}
+
+  currentUrl(): string {
+    return this.browser.webContents.getURL();
+  }
+
+  setTaskAbortSignal(signal?: AbortSignal): void {
+    if (this.taskAbortSignal && this.taskAbortListener) this.taskAbortSignal.removeEventListener('abort', this.taskAbortListener);
+    this.taskAbortSignal = signal ?? null;
+    this.taskAbortListener = null;
+    if (!signal) return;
+    const stopLoading = () => {
+      try {
+        if (!this.browser.isDestroyed() && !this.browser.webContents.isDestroyed()) this.browser.webContents.stop();
+      } catch {
+        // Stopping a navigation is best-effort. Cancellation must still complete.
+      }
+    };
+    this.taskAbortListener = stopLoading;
+    signal.addEventListener('abort', stopLoading, { once: true });
+  }
+
+  private throwIfTaskCancelled(): void {
+    if (this.taskAbortSignal?.aborted) throw new ConnectorError('TASK_CANCELLED', '当前任务已终止。');
+  }
 
   private async diagnosePidFilter(stage: string, expectedPids: string[] = []): Promise<void> {
     const snapshot = await this.execute<{
@@ -385,9 +504,10 @@ export class Q1Connector {
     await this.diagnostics.event('filters.pid.ui', { stage, ...snapshot });
   }
 
-  private async execute<T>(script: string, stage: string): Promise<T> {
+  private async execute<T>(script: string, stage: string, logFailure = true): Promise<T> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 4; attempt += 1) {
+      this.throwIfTaskCancelled();
       if (this.browser.isDestroyed() || this.browser.webContents.isDestroyed()) {
         lastError = new Error('Object has been destroyed');
         break;
@@ -395,13 +515,14 @@ export class Q1Connector {
       try {
         return await this.browser.webContents.executeJavaScript(script, true) as T;
       } catch (error) {
+        this.throwIfTaskCancelled();
         lastError = error;
         const message = error instanceof Error ? error.message : String(error);
         if (!message.includes('Object has been destroyed') || attempt === 3) break;
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
-    await this.diagnostics.error(stage, lastError);
+    if (logFailure) await this.diagnostics.error(stage, lastError);
     throw new ConnectorError('BROWSER_EXECUTION_FAILED', '后台页面暂时无法读取，请确认浏览器仍处于登录状态后重试。');
   }
 
@@ -415,7 +536,521 @@ export class Q1Connector {
     if (!this.browser || this.browser.isDestroyed()) return false;
     if (!this.browser.webContents.getURL().startsWith(OPS_ORIGIN)) return false;
     return this.execute<boolean>(`fetch('/api/current', { credentials: 'include' }).then((response) => response.ok)`, 'login.status')
+      .catch(() => {
+        this.throwIfTaskCancelled();
+        return false;
+      });
+  }
+
+  async refreshLoginSession(): Promise<boolean> {
+    if (!this.browser || this.browser.isDestroyed()) return false;
+    if (!this.browser.webContents.getURL().startsWith(OPS_ORIGIN)) return false;
+    return this.execute<boolean>(`fetch('/api/current', {
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'cache-control': 'no-cache', pragma: 'no-cache' },
+    }).then((response) => response.ok)`, 'login.refresh')
       .catch(() => false);
+  }
+
+  private async findLoginControlPoint(kind: 'username' | 'password' | 'login' | 'dingtalk' | 'dingtalkScan' | 'dingtalkRefresh'): Promise<ReportFrameControlPoint> {
+    return this.execute<ReportFrameControlPoint>(`(${function findControl(control: string) {
+      const roots: Array<{ root: Document | ShadowRoot; x: number; y: number }> = [];
+      const collectRoots = (root: Document | ShadowRoot, x: number, y: number) => {
+        roots.push({ root, x, y });
+        for (const element of Array.from(root.querySelectorAll('*'))) {
+          const node = element as HTMLElement;
+          if (node.shadowRoot) collectRoots(node.shadowRoot, x, y);
+          if (element.tagName !== 'IFRAME') continue;
+          try {
+            const frameDocument = (element as HTMLIFrameElement).contentDocument;
+            if (!frameDocument) continue;
+            const rect = element.getBoundingClientRect();
+            collectRoots(frameDocument, x + rect.left, y + rect.top);
+          } catch {
+            // Cross-origin frames cannot be inspected from the host page.
+          }
+        }
+      };
+      collectRoots(document, 0, 0);
+      const visible = (element: Element) => {
+        const node = element as HTMLElement;
+        const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && style?.display !== 'none' && style?.visibility !== 'hidden';
+      };
+      const textOf = (element: Element) => ((element as HTMLElement).innerText || element.textContent || (element as HTMLInputElement).value || element.getAttribute('aria-label') || '').replace(/\\s+/gu, '').trim();
+      const inputEntries = roots.flatMap(({ root, x, y }) => Array.from(root.querySelectorAll('input')).filter(visible).map((input) => ({ input: input as HTMLInputElement, x, y })));
+      if (control === 'username') {
+        const entry = inputEntries.find(({ input }) => input.type !== 'password' && input.type !== 'checkbox' && input.type !== 'radio' && !/验证码|短信/iu.test(input.placeholder || input.getAttribute('aria-label') || ''));
+        if (!entry) throw new Error('username input');
+        const rect = entry.input.getBoundingClientRect();
+        return { x: entry.x + rect.left + rect.width / 2, y: entry.y + rect.top + rect.height / 2 };
+      }
+      if (control === 'password') {
+        const entry = inputEntries.find(({ input }) => input.type === 'password');
+        if (!entry) throw new Error('password input');
+        const rect = entry.input.getBoundingClientRect();
+        return { x: entry.x + rect.left + rect.width / 2, y: entry.y + rect.top + rect.height / 2 };
+      }
+      const candidates = roots.flatMap(({ root, x, y }) => Array.from(root.querySelectorAll('button,a,input[type="submit"],[role="button"],[role="tab"],[class*="tab" i],[class*="login" i],[class*="switch" i],div,span')).filter(visible).map((item) => ({ item, x, y })));
+      const matchingCandidates = candidates.filter(({ item }) => {
+        const text = textOf(item);
+        if (control === 'dingtalk') return text === '钉钉登录' || text === '使用钉钉登录';
+        if (control === 'dingtalkScan') return text === '扫码登录';
+        if (control === 'dingtalkRefresh') return text === '点击刷新' || /二维码失效.*点击刷新|点击刷新/iu.test(text);
+        return /^登录$|登录/iu.test(text) && !/钉钉|扫码/iu.test(text);
+      });
+      const button = matchingCandidates
+        .map(({ item, x, y }) => {
+          const clickable = item.closest('button,a,input[type="submit"],[role="button"],[role="tab"],[class*="tab-item" i],[class*="switch-item" i]') || item;
+          const rect = clickable.getBoundingClientRect();
+          return { item: clickable, x, y, area: rect.width * rect.height };
+        })
+        .sort((left, right) => left.area - right.area)[0];
+      if (!button) throw new Error(`${control} button`);
+      const rect = button.item.getBoundingClientRect();
+      return { x: button.x + rect.left + rect.width / 2, y: button.y + rect.top + rect.height / 2 };
+    }})(${JSON.stringify(kind)})`, `login.control.${kind}`);
+  }
+
+  private async clickPageControl(kind: 'login' | 'dingtalk' | 'dingtalkScan' | 'dingtalkRefresh'): Promise<void> {
+    const point = await this.findLoginControlPoint(kind);
+    this.browser.focus();
+    this.browser.webContents.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
+    this.browser.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    this.browser.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  }
+
+  private async insertPageText(kind: 'username' | 'password', value: string): Promise<void> {
+    const point = await this.findLoginControlPoint(kind);
+    this.browser.focus();
+    this.browser.webContents.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
+    this.browser.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    this.browser.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    const debuggerClient = this.browser.webContents.debugger;
+    let attachedHere = false;
+    try {
+      if (!debuggerClient.isAttached()) {
+        debuggerClient.attach('1.3');
+        attachedHere = true;
+      }
+      for (const event of [
+        { type: 'keyDown', key: 'Control', code: 'ControlLeft', modifiers: 2, windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 },
+        { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 },
+        { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 },
+        { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 },
+      ]) await debuggerClient.sendCommand('Input.dispatchKeyEvent', event);
+      await debuggerClient.sendCommand('Input.insertText', { text: value });
+    } finally {
+      if (attachedHere && debuggerClient.isAttached()) debuggerClient.detach();
+    }
+  }
+
+  private async isSmsChallengeVisible(): Promise<boolean> {
+    return this.execute<boolean>(`(${function hasSmsChallenge() {
+      const visible = (element: Element) => {
+        const node = element as HTMLElement;
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+      };
+      const text = (document.body?.innerText || '').replace(/\\s+/gu, '');
+      const input = Array.from(document.querySelectorAll('input')).some((item) => visible(item) && /验证码|短信|校验码/iu.test(item.placeholder || item.getAttribute('aria-label') || ''));
+      return input || /短信验证码|验证码登录|请输入验证码/iu.test(text);
+    }})()`, 'login.sms-state').catch(() => false);
+  }
+
+  private async isLoginErrorVisible(): Promise<boolean> {
+    return this.execute<boolean>(`(${function hasLoginError() {
+      const text = (document.body?.innerText || '').replace(/\\s+/gu, '');
+      return /账号或密码错误|用户名或密码错误|登录失败|密码错误|账号不存在/iu.test(text);
+    }})()`, 'login.error-state').catch(() => false);
+  }
+
+  private async loginPageContentState(): Promise<LoginPageContentState> {
+    const pageState = await this.execute<LoginPageContentState>(`(()=>{
+      const visible = (element: Element) => {
+        const node = element as HTMLElement;
+        const style = window.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') > 0;
+      };
+      const visibleText = Array.from(document.body?.querySelectorAll('*') || [])
+        .filter(visible)
+        .some((element) => Boolean(((element as HTMLElement).innerText || element.textContent || '').replace(/\\s+/gu, '').trim()));
+      const interactiveElementCount = Array.from(document.querySelectorAll('input,button,a,select,textarea,[role="button"],[role="tab"]')).filter(visible).length;
+      const visualElementCount = Array.from(document.querySelectorAll('img,canvas,svg,iframe,video')).filter(visible).length;
+      return { hasVisibleText: visibleText, interactiveElementCount, visualElementCount };
+    })()`, 'login.page-content', false).catch(() => null);
+    if (pageState) return pageState;
+    this.throwIfTaskCancelled();
+    try {
+      const image = await this.browser.webContents.capturePage();
+      if (!image.isEmpty() && hasVisibleLoginScreenshotPixels(image.toBitmap())) {
+        await this.diagnostics.event('login.page-content.capture', { result: 'visible' });
+        return { hasVisibleText: false, interactiveElementCount: 0, visualElementCount: 1 };
+      }
+      await this.diagnostics.event('login.page-content.capture', { result: 'blank' });
+    } catch {
+      this.throwIfTaskCancelled();
+      await this.diagnostics.event('login.page-content.capture', { result: 'unavailable' });
+    }
+    return { hasVisibleText: false, interactiveElementCount: 0, visualElementCount: 0 };
+  }
+
+  /** Only used by the automatic login flow; manual browser navigation is never reloaded here. */
+  async recoverBlankAutoLoginPage(onStatus?: (message: string) => void): Promise<void> {
+    onStatus?.('正在等待后台登录页加载…');
+    await this.diagnostics.event('login.blank-page.wait', { attempt: 0, maxAttempts: 3 });
+    for (let reloadAttempt = 0; reloadAttempt <= 3; reloadAttempt += 1) {
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        this.throwIfTaskCancelled();
+        if (hasVisibleLoginPageContent(await this.loginPageContentState())) {
+          onStatus?.('后台登录页已恢复，正在继续登录…');
+          await this.diagnostics.event('login.blank-page.recovered', { attempt: reloadAttempt, maxAttempts: 3 });
+          return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        this.throwIfTaskCancelled();
+      }
+      this.throwIfTaskCancelled();
+      if (reloadAttempt === 3 || this.browser.isDestroyed() || this.browser.webContents.isDestroyed()) break;
+      const attempt = reloadAttempt + 1;
+      onStatus?.(`登录页白屏，正在第 ${attempt}/3 次强制刷新…`);
+      try {
+        this.browser.webContents.reloadIgnoringCache();
+        await this.diagnostics.event('login.blank-page.refresh', { attempt, maxAttempts: 3, result: 'requested' });
+      } catch {
+        await this.diagnostics.event('login.blank-page.refresh', { attempt, maxAttempts: 3, result: 'failed' });
+        // Continue the same bounded recovery loop; a later refresh can still recover the page.
+      }
+    }
+    onStatus?.('登录页连续强制刷新 3 次后仍为空白。');
+    await this.diagnostics.event('login.blank-page.failed', { attempt: 3, maxAttempts: 3 });
+    throw new ConnectorError('LOGIN_PAGE_BLANK', '自动打开的后台登录页连续刷新 3 次后仍为空白，请检查网络后手动打开内置浏览器重试。');
+  }
+
+  async loginWithCredentials(username: string, password: string): Promise<LoginAttemptResult> {
+    if (await this.isLoggedIn()) return { result: 'success' };
+    if (!this.browser.webContents.getURL().includes('sso-auth.q1.com')) await this.browser.loadURL(`${OPS_ORIGIN}/`);
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline && !this.browser.webContents.getURL().includes('sso-auth.q1.com')) await new Promise((resolve) => setTimeout(resolve, 120));
+    try {
+      await this.insertPageText('username', username);
+      await this.insertPageText('password', password);
+      await this.clickPageControl('login');
+    } catch {
+      return { result: 'failed', code: 'LOGIN_PAGE_UNAVAILABLE' };
+    }
+    const resultDeadline = Date.now() + 12_000;
+    while (Date.now() < resultDeadline) {
+      if (await this.isLoggedIn()) return { result: 'success' };
+      if (await this.isSmsChallengeVisible()) return { result: 'needs_dingtalk', code: 'LOGIN_SMS_REQUIRED' };
+      if (await this.isLoginErrorVisible()) return { result: 'failed', code: 'LOGIN_CREDENTIALS_INVALID' };
+      await new Promise((resolve) => setTimeout(resolve, 180));
+    }
+    return { result: 'failed', code: 'LOGIN_TIMEOUT' };
+  }
+
+  private async isDingTalkScanMode(): Promise<boolean> {
+    return this.execute<boolean>(`(()=>{
+      const roots: Array<Document | ShadowRoot> = [];
+      const collectRoots = (root: Document | ShadowRoot) => {
+        roots.push(root);
+        for (const element of Array.from(root.querySelectorAll('*'))) {
+          const node = element as HTMLElement;
+          if (node.shadowRoot) collectRoots(node.shadowRoot);
+          if (element.tagName !== 'IFRAME') continue;
+          try {
+            const frameDocument = (element as HTMLIFrameElement).contentDocument;
+            if (frameDocument) collectRoots(frameDocument);
+          } catch {
+            // Cross-origin frames cannot be inspected from the host page.
+          }
+        }
+      };
+      collectRoots(document);
+      const visible = (element: Element) => {
+        const node = element as HTMLElement;
+        const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && style?.display !== 'none' && style?.visibility !== 'hidden';
+      };
+      const bodyText = roots.map((root) => (root.querySelector('body') as HTMLElement | null)?.innerText || '').join('').replace(/\\s+/gu, '');
+      if (/使用钉钉扫码|用钉钉扫码|扫码或点击头像|扫码授权登录/iu.test(bodyText)) return true;
+      return roots.flatMap((root) => Array.from(root.querySelectorAll('button,a,[role="tab"],[class*="tab" i],div,span')))
+        .filter(visible)
+        .filter((element) => ((element as HTMLElement).innerText || element.textContent || '').replace(/\\s+/gu, '').trim() === '扫码登录')
+        .some((element) => {
+          const node = element as HTMLElement;
+          const ownState = node.getAttribute('aria-selected') === 'true'
+            || node.getAttribute('aria-current') === 'true'
+            || /active|selected|current/iu.test(String(node.className || ''));
+          const parent = node.parentElement;
+          return ownState || Boolean(parent && (/active|selected|current/iu.test(String(parent.className || '')) || parent.getAttribute('aria-selected') === 'true'));
+        });
+    })()`, 'login.dingtalk-scan-mode').catch(() => false);
+  }
+
+  private async isDingTalkQrExpired(): Promise<boolean> {
+    return this.execute<boolean>(`(()=>{
+      const roots: Array<Document | ShadowRoot> = [];
+      const collectRoots = (root: Document | ShadowRoot) => {
+        roots.push(root);
+        for (const element of Array.from(root.querySelectorAll('*'))) {
+          const node = element as HTMLElement;
+          if (node.shadowRoot) collectRoots(node.shadowRoot);
+          if (element.tagName !== 'IFRAME') continue;
+          try {
+            const frameDocument = (element as HTMLIFrameElement).contentDocument;
+            if (frameDocument) collectRoots(frameDocument);
+          } catch {
+            // Cross-origin frames cannot be inspected from the host page.
+          }
+        }
+      };
+      collectRoots(document);
+      const visible = (element: Element) => {
+        const node = element as HTMLElement;
+        const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && style?.display !== 'none' && style?.visibility !== 'hidden';
+      };
+      return roots.some((root) => Array.from(root.querySelectorAll('*'))
+        .filter(visible)
+        .some((element) => /二维码失效/iu.test(((element as HTMLElement).innerText || element.textContent || '').replace(/\\s+/gu, ''))));
+    })()`, 'login.dingtalk-qr-expired').catch(() => false);
+  }
+
+  private async hasDingTalkLocalLoginPanel(): Promise<boolean> {
+    return this.execute<boolean>(`(()=>{
+      const text = (document.body?.innerText || '').replace(/\\s+/gu, '');
+      return /点击头像授权登录|头像授权登录/iu.test(text);
+    })()`, 'login.dingtalk-local-panel').catch(() => false);
+  }
+
+  private async findQrCodeRect(): Promise<DingTalkQrRect | null> {
+    return this.execute<DingTalkQrRect | null>(`(()=>{
+      const isLikelyQr = ${isLikelyDingTalkQrCandidate.toString()};
+      const roots: Array<{ root: Document | ShadowRoot; x: number; y: number }> = [];
+      const collectRoots = (root: Document | ShadowRoot, x: number, y: number) => {
+        roots.push({ root, x, y });
+        for (const element of Array.from(root.querySelectorAll('*'))) {
+          const node = element as HTMLElement;
+          if (node.shadowRoot) collectRoots(node.shadowRoot, x, y);
+          if (element.tagName !== 'IFRAME') continue;
+          try {
+            const frameDocument = (element as HTMLIFrameElement).contentDocument;
+            if (!frameDocument) continue;
+            const rect = element.getBoundingClientRect();
+            collectRoots(frameDocument, x + rect.left, y + rect.top);
+          } catch {
+            // Cross-origin frames cannot be inspected from the host page.
+          }
+        }
+      };
+      collectRoots(document, 0, 0);
+      const visible = (element: Element) => {
+        const node = element as HTMLElement;
+        const style = node.ownerDocument.defaultView?.getComputedStyle(node);
+        const rect = node.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0 && style?.display !== 'none' && style?.visibility !== 'hidden';
+      };
+      const candidates = roots.flatMap(({ root, x, y }) => Array.from(root.querySelectorAll('*')).map((element) => ({ element, x, y })))
+        .filter(({ element }) => visible(element))
+        .filter(({ element, x, y }) => {
+          const rect = element.getBoundingClientRect();
+          return isLikelyQr({
+            tagName: element.tagName,
+            className: String((element as HTMLElement).className || ''),
+            id: element.id,
+            alt: element.getAttribute('alt') || '',
+            backgroundImage: element.ownerDocument.defaultView?.getComputedStyle(element as HTMLElement).backgroundImage,
+            width: rect.width,
+            height: rect.height,
+          });
+        });
+      const score = (entry: { element: Element; x: number; y: number }) => {
+        const element = entry.element;
+        const hint = element.id + ' ' + String((element as HTMLElement).className || '') + ' ' + (element.getAttribute('alt') || '');
+        const rect = element.getBoundingClientRect();
+        return (/二维码|qrcode|qr-code|qr_code/iu.test(hint) ? 1000 : 0) + (element.tagName === 'IMG' || element.tagName === 'CANVAS' ? 500 : 0) + Math.min(rect.width, rect.height);
+      };
+      const candidate = candidates.sort((left, right) => score(right) - score(left))[0];
+      if (!candidate) return null;
+      const rect = candidate.element.getBoundingClientRect();
+      return { x: candidate.x + rect.left, y: candidate.y + rect.top, width: rect.width, height: rect.height, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight };
+    })()`, 'login.qr-rect').catch(() => null);
+  }
+
+  async openDingTalkLogin(options: { resolveBrowser?: () => BrowserHost | null } = {}): Promise<CapturedQrCode> {
+    const resolveBrowser = () => {
+      const nextBrowser = options.resolveBrowser?.();
+      if (nextBrowser) this.browser = nextBrowser;
+    };
+    resolveBrowser();
+    const currentUrl = this.browser.webContents.getURL();
+    if (!currentUrl.includes('sso-auth.q1.com') && !currentUrl.includes('login.dingtalk.com')) {
+      try {
+        await this.browser.loadURL(`${OPS_ORIGIN}/`);
+      } catch {
+        throw new ConnectorError('DINGTALK_LOGIN_PAGE_UNAVAILABLE', '无法打开钉钉登录页，请检查网络后重新尝试。');
+      }
+    }
+    let dingTalkLoginOpened = this.browser.webContents.getURL().includes('login.dingtalk.com');
+    if (!dingTalkLoginOpened) {
+      const loginDeadline = Date.now() + 12_000;
+      while (Date.now() < loginDeadline) {
+        resolveBrowser();
+        if (this.browser.webContents.getURL().includes('login.dingtalk.com')) {
+          dingTalkLoginOpened = true;
+          break;
+        }
+        if (!this.browser.webContents.getURL().includes('sso-auth.q1.com')) {
+          await new Promise((resolve) => setTimeout(resolve, 180));
+          continue;
+        }
+        try {
+          await this.clickPageControl('dingtalk');
+          const pageDeadline = Date.now() + 4_000;
+          while (Date.now() < pageDeadline) {
+            resolveBrowser();
+            if (this.browser.webContents.getURL().includes('login.dingtalk.com')) {
+              dingTalkLoginOpened = true;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 120));
+          }
+          if (dingTalkLoginOpened) break;
+        } catch {
+          // The login page may still be loading on the first attempt.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 180));
+      }
+    }
+    if (!dingTalkLoginOpened) throw new ConnectorError('DINGTALK_LOGIN_PAGE_UNAVAILABLE', '钉钉登录入口没有加载完成，请检查网络后重试。');
+    const deadline = Date.now() + 20_000;
+    let scanLoginRequested = false;
+    let scanMode = await this.isDingTalkScanMode();
+    let rect: DingTalkQrRect | null = null;
+    let firstQrAt: number | null = null;
+    let lastRectSignature = '';
+    let lastRectChangedAt = Date.now();
+    let qrRefreshAttempts = 0;
+    while (Date.now() < deadline) {
+      resolveBrowser();
+      if (!scanMode) {
+        try {
+          await this.clickPageControl('dingtalkScan');
+          scanLoginRequested = true;
+        } catch {
+          // The DingTalk page may still be navigating; retry until the scan-login tab appears.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        resolveBrowser();
+        scanMode = await this.isDingTalkScanMode();
+      }
+      resolveBrowser();
+      if (await this.isDingTalkQrExpired()) {
+        if (qrRefreshAttempts >= 3) {
+          throw new ConnectorError('DINGTALK_QR_REFRESH_FAILED', '钉钉登录二维码连续刷新 3 次仍然失效，请稍后重试。');
+        }
+        try {
+          await this.clickPageControl('dingtalkRefresh');
+          qrRefreshAttempts += 1;
+          rect = null;
+          firstQrAt = null;
+          lastRectSignature = '';
+          lastRectChangedAt = Date.now();
+          await new Promise((resolve) => setTimeout(resolve, 400));
+          continue;
+        } catch {
+          // The page can briefly render the expiry overlay before its refresh control is interactive.
+          await new Promise((resolve) => setTimeout(resolve, 220));
+          continue;
+        }
+      }
+      const nextRect = await this.findQrCodeRect();
+      if (nextRect) {
+        scanMode = true;
+        rect = nextRect;
+        if (firstQrAt === null) firstQrAt = Date.now();
+        const signature = [rect.x, rect.y, rect.width, rect.height].map((value) => Math.round(value)).join(':');
+        if (signature !== lastRectSignature) {
+          lastRectSignature = signature;
+          lastRectChangedAt = Date.now();
+        }
+        const localPanelDetected = await this.hasDingTalkLocalLoginPanel();
+        const stableFor = Date.now() - lastRectChangedAt;
+        const visibleFor = Date.now() - firstQrAt;
+        if (stableFor >= 900 && (localPanelDetected || visibleFor >= 6_000) && !(await this.isDingTalkQrExpired())) break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 260));
+    }
+    if (!rect && (scanMode || scanLoginRequested)) {
+      const fallbackImage = await this.captureDingTalkQrFallback();
+      if (fallbackImage) return { image: fallbackImage };
+    }
+    if (!rect) throw new ConnectorError('DINGTALK_QR_NOT_FOUND', '钉钉登录二维码没有加载出来。请确认钉钉登录页的“扫码登录”已打开后重试。');
+
+    const originalZoom = this.browser.webContents.getZoomFactor();
+    try {
+      for (const zoomFactor of [originalZoom, Math.min(originalZoom, 0.85), Math.min(originalZoom, 0.7)]) {
+        if (this.browser.webContents.getZoomFactor() !== zoomFactor) {
+          this.browser.webContents.setZoomFactor(zoomFactor);
+          await new Promise((resolve) => setTimeout(resolve, 260));
+          rect = await this.findQrCodeRect();
+        }
+        if (!rect) continue;
+        const fitsViewport = rect.x >= 0 && rect.y >= 0
+          && rect.x + rect.width <= rect.viewportWidth
+          && rect.y + rect.height <= rect.viewportHeight;
+        if (!fitsViewport) continue;
+        const padding = 8;
+        const left = Math.max(0, Math.floor(rect.x - padding));
+        const top = Math.max(0, Math.floor(rect.y - padding));
+        const right = Math.min(rect.viewportWidth, Math.ceil(rect.x + rect.width + padding));
+        const bottom = Math.min(rect.viewportHeight, Math.ceil(rect.y + rect.height + padding));
+        const captureRect = { x: left, y: top, width: right - left, height: bottom - top };
+        try {
+          const image = await this.browser.webContents.capturePage(captureRect);
+          if (!image.isEmpty()) return { image: image.toPNG() };
+        } catch {
+          // Some Electron builds cannot capture a WebContentsView with a crop rectangle.
+        }
+        try {
+          const fullPage = await this.browser.webContents.capturePage();
+          const image = fullPage.crop(captureRect);
+          if (!image.isEmpty()) return { image: image.toPNG() };
+        } catch {
+          // Try the next zoom level before reporting a capture failure.
+        }
+      }
+    } finally {
+      if (this.browser.webContents.getZoomFactor() !== originalZoom) this.browser.webContents.setZoomFactor(originalZoom);
+    }
+    throw new ConnectorError('DINGTALK_QR_CAPTURE_FAILED', '钉钉登录二维码位置超出当前浏览器可见范围，截图不完整。请重试。');
+  }
+
+  private async captureDingTalkQrFallback(): Promise<Buffer | null> {
+    try {
+      const fullPage = await this.browser.webContents.capturePage();
+      if (fullPage.isEmpty()) return null;
+      const size = fullPage.getSize();
+      const imageRect = findDingTalkQrImageRect(fullPage.toBitmap(), size.width, size.height);
+      if (!imageRect) return fullPage.toPNG();
+      const padding = Math.max(12, Math.round(Math.min(imageRect.width, imageRect.height) * 0.12));
+      const left = Math.max(0, imageRect.x - padding);
+      const top = Math.max(0, imageRect.y - padding);
+      const right = Math.min(size.width, imageRect.x + imageRect.width + padding);
+      const bottom = Math.min(size.height, imageRect.y + imageRect.height + padding);
+      const cropped = fullPage.crop({ x: left, y: top, width: right - left, height: bottom - top });
+      return cropped.isEmpty() ? fullPage.toPNG() : cropped.toPNG();
+    } catch {
+      return null;
+    }
   }
 
   async resolveVersionCandidates(gameId: string): Promise<VersionCandidate[]> {
@@ -572,12 +1207,21 @@ export class Q1Connector {
         if (!button) throw new Error('pid filter');
         return pointOf(button);
       }
+      if (request.target === 'pitcher-filter') {
+        const button = visibleButtons().find((element) => {
+          const text = visibleText(element);
+          return text.startsWith('投手') && !text.includes('投手明细') && text.length <= 80;
+        });
+        if (!button) throw new Error('pitcher filter');
+        return pointOf(button);
+      }
       if (request.target === 'query') {
         const button = visibleButtons().find((element) => !element.disabled && element.getAttribute('aria-disabled') !== 'true' && textOf(element) === '查询');
         if (!button) throw new Error('query');
         return pointOf(button);
       }
       const dialog = Array.from(doc.querySelectorAll('[role="dialog"]')).filter(isVisible).at(-1) as HTMLElement | undefined;
+      const picker = Array.from(doc.querySelectorAll('[role="dialog"],[role="listbox"],[role="menu"]')).filter(isVisible).at(-1) as HTMLElement | undefined;
       if (request.target === 'pid-search') {
         if (!dialog) throw new Error('pid dialog');
         const input = Array.from(dialog.querySelectorAll('input'))
@@ -607,6 +1251,42 @@ export class Q1Connector {
         if (!dialog) throw new Error('pid dialog');
         const button = Array.from(dialog.querySelectorAll('button')).find((element) => isVisible(element) && !(element as HTMLButtonElement).disabled && textOf(element) === '添加筛选器');
         if (!button) throw new Error('pid apply');
+        return pointOf(button);
+      }
+      if (request.target === 'pitcher-search') {
+        if (!picker) throw new Error('pitcher picker');
+        const input = Array.from(picker.querySelectorAll('input:not([type="checkbox"]):not([type="radio"])'))
+          .find((element) => isVisible(element) && /多个关键词|关键词|以,隔开/gu.test(element.getAttribute('placeholder') || ''));
+        if (!input) throw new Error('pitcher search');
+        return pointOf(input);
+      }
+      if (request.target === 'pitcher-option') {
+        if (!picker || !request.value) throw new Error('pitcher option');
+        const wanted = request.value.replace(/\s+/gu, '').toLowerCase();
+        const rowFor = (checkbox: HTMLInputElement) => {
+          let node: HTMLElement | null = checkbox.parentElement;
+          while (node && node !== picker) {
+            const checkboxes = Array.from(node.querySelectorAll('input[type="checkbox"]')).filter(isVisible);
+            const text = visibleText(node).toLowerCase();
+            if (checkboxes.length === 1 && checkboxes[0] === checkbox && text.includes(wanted)) return node;
+            node = node.parentElement;
+          }
+          return null;
+        };
+        const checkbox = Array.from(picker.querySelectorAll('input[type="checkbox"]'))
+          .filter(isVisible)
+          .find((element) => rowFor(element as HTMLInputElement) !== null);
+        if (!checkbox) throw new Error('pitcher option');
+        return pointOf(checkbox);
+      }
+      if (request.target === 'pitcher-apply') {
+        if (!picker) throw new Error('pitcher picker');
+        const button = Array.from(picker.querySelectorAll('button')).find((element) => {
+          const text = visibleText(element);
+          return isVisible(element) && !(element as HTMLButtonElement).disabled
+            && (text === '添加筛选器' || /^(确定|确认|应用)$/u.test(text));
+        });
+        if (!button) throw new Error('pitcher apply');
         return pointOf(button);
       }
       const calendarHeaderControls = visibleButtons()
@@ -933,6 +1613,224 @@ export class Q1Connector {
     }
   }
 
+  private async hasPitcherPicker(): Promise<boolean> {
+    return this.execute<boolean>(`${findActiveReportFrame.toString()}
+      (()=>{
+      const iframe = findActiveReportFrame();
+      const doc = iframe?.contentDocument;
+      const visible = (element) => {
+        const node = element;
+        return node.offsetParent !== null || node.getClientRects().length > 0;
+      };
+      return Array.from(doc?.querySelectorAll('[role="dialog"],[role="listbox"],[role="menu"]') ?? [])
+        .filter(visible)
+        .some((container) => Array.from(container.querySelectorAll('input[type="checkbox"]')).some(visible));
+    })()`, 'filters.pitcher.picker-state').catch(() => false);
+  }
+
+  private async waitForPitcherPicker(open: boolean): Promise<void> {
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      if (await this.hasPitcherPicker() === open) return;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    throw new ConnectorError('PITCHER_FILTER_NOT_APPLIED', open ? '后台投手筛选器无法打开，请重新尝试。' : '后台投手筛选没有成功提交，请重新尝试。');
+  }
+
+  private async preparePitcherFilter(stage: string): Promise<void> {
+    for (const mode of [...REPORT_FRAME_CLICK_MODES]) {
+      try {
+        if (!await this.hasPitcherPicker()) {
+          await this.clickReportFrameControl('pitcher-filter', mode);
+          await this.waitForPitcherPicker(true);
+        }
+        await this.diagnostics.event(stage, { mode, result: 'true' });
+        return;
+      } catch {
+        await this.diagnostics.event(stage, { mode, result: 'false' });
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      }
+    }
+    throw new ConnectorError('PITCHER_FILTER_NOT_APPLIED', '后台投手筛选器无法打开，请重新尝试。');
+  }
+
+  private async hasPitcherSearchInput(): Promise<boolean> {
+    return this.execute<boolean>(`${findActiveReportFrame.toString()}
+      (()=>{
+      const iframe = findActiveReportFrame();
+      const doc = iframe?.contentDocument;
+      const visible = (element) => {
+        const node = element;
+        return node.offsetParent !== null || node.getClientRects().length > 0;
+      };
+      const picker = Array.from(doc?.querySelectorAll('[role="dialog"],[role="listbox"],[role="menu"]') ?? []).filter(visible).at(-1);
+      return Boolean(Array.from(picker?.querySelectorAll('input:not([type="checkbox"]):not([type="radio"])') ?? []).find((input) => visible(input) && /多个关键词|关键词|以,隔开/gu.test(input.getAttribute('placeholder') || '')));
+    })()`, 'filters.pitcher.search-state').catch(() => false);
+  }
+
+  private async hasFocusedPitcherSearchInput(): Promise<boolean> {
+    return this.execute<boolean>(`${findActiveReportFrame.toString()}
+      (()=>{
+      const iframe = findActiveReportFrame();
+      const doc = iframe?.contentDocument;
+      const visible = (element) => {
+        const node = element;
+        return node.offsetParent !== null || node.getClientRects().length > 0;
+      };
+      const picker = Array.from(doc?.querySelectorAll('[role="dialog"],[role="listbox"],[role="menu"]') ?? []).filter(visible).at(-1);
+      const input = Array.from(picker?.querySelectorAll('input:not([type="checkbox"]):not([type="radio"])') ?? []).find((element) => visible(element) && /多个关键词|关键词|以,隔开/gu.test(element.getAttribute('placeholder') || ''));
+      return Boolean(input && doc?.activeElement === input);
+    })()`, 'filters.pitcher.search-focus-state').catch(() => false);
+  }
+
+  private async focusPitcherSearchInput(): Promise<void> {
+    for (const mode of [...REPORT_FRAME_CLICK_MODES]) {
+      try {
+        await this.clickReportFrameControl('pitcher-search', mode);
+        const deadline = Date.now() + 1000;
+        while (Date.now() < deadline) {
+          if (await this.hasFocusedPitcherSearchInput()) return;
+          await new Promise((resolve) => setTimeout(resolve, 80));
+        }
+      } catch {
+        // Continue through the real input routes only.
+      }
+    }
+    throw new ConnectorError('PITCHER_FILTER_NOT_APPLIED', '后台投手搜索框没有进入可输入状态，请重新尝试。');
+  }
+
+  private async setPitcherSearchValue(value: string): Promise<void> {
+    await this.focusPitcherSearchInput();
+    const debuggerClient = this.browser.webContents.debugger;
+    let attachedHere = false;
+    try {
+      if (!debuggerClient.isAttached()) {
+        debuggerClient.attach('1.3');
+        attachedHere = true;
+      }
+      for (const event of [
+        { type: 'keyDown', key: 'Control', code: 'ControlLeft', modifiers: 2, windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 },
+        { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 },
+        { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65 },
+        { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, nativeVirtualKeyCode: 17 },
+      ]) await debuggerClient.sendCommand('Input.dispatchKeyEvent', event);
+      await debuggerClient.sendCommand('Input.insertText', { text: value });
+    } catch (error) {
+      await this.diagnostics.error('filters.pitcher.search-input', error);
+      throw new ConnectorError('PITCHER_FILTER_NOT_APPLIED', '后台投手搜索输入未生效，请重新尝试。');
+    } finally {
+      if (attachedHere && debuggerClient.isAttached()) debuggerClient.detach();
+    }
+    const populated = await this.execute<boolean>(`${findActiveReportFrame.toString()}
+      (${function verify(value: string) {
+      const iframe = findActiveReportFrame();
+      const doc = iframe?.contentDocument;
+      const visible = (element: Element) => {
+        const node = element as HTMLElement;
+        return node.offsetParent !== null || node.getClientRects().length > 0;
+      };
+      const picker = Array.from(doc?.querySelectorAll('[role="dialog"],[role="listbox"],[role="menu"]') ?? []).filter(visible).at(-1);
+      const input = Array.from(picker?.querySelectorAll('input:not([type="checkbox"]):not([type="radio"])') ?? []).find((element) => visible(element) && /多个关键词|关键词|以,隔开/gu.test(element.getAttribute('placeholder') || '')) as HTMLInputElement | undefined;
+      return input?.value.trim() === value;
+    }})(${JSON.stringify(value)})`, 'filters.pitcher.search-verify').catch(() => false);
+    if (!populated) throw new ConnectorError('PITCHER_FILTER_NOT_APPLIED', '后台投手搜索条件未生效，请重新尝试。');
+  }
+
+  private async readPitcherDialogOptionState(optionValue: string, stage: string, searchValue: string): Promise<PitcherDialogOptionState> {
+    return this.execute<PitcherDialogOptionState>(`${findActiveReportFrame.toString()}
+      (${function inspect(value: string, search: string) {
+      const iframe = findActiveReportFrame();
+      const doc = iframe?.contentDocument;
+      const visible = (element: Element) => {
+        const node = element as HTMLElement;
+        return node.offsetParent !== null || node.getClientRects().length > 0;
+      };
+      const picker = Array.from(doc?.querySelectorAll('[role="dialog"],[role="listbox"],[role="menu"]') ?? []).filter(visible).at(-1);
+      if (!picker) throw new Error('pitcher picker');
+      const normalize = (text: string) => text.replace(/\s+/gu, '').trim().toLowerCase();
+      const wanted = normalize(value);
+      const textOf = (element: Element) => normalize((element as HTMLElement).innerText || element.textContent || '');
+      const rowFor = (checkbox: HTMLInputElement) => {
+        let node: HTMLElement | null = checkbox.parentElement;
+        while (node && node !== picker) {
+          const checkboxes = Array.from(node.querySelectorAll('input[type="checkbox"]')).filter(visible);
+          if (checkboxes.length === 1 && checkboxes[0] === checkbox && textOf(node).includes(wanted)) return node;
+          node = node.parentElement;
+        }
+        return null;
+      };
+      const rows = Array.from(picker.querySelectorAll('input[type="checkbox"]'))
+        .filter(visible)
+        .map((element) => ({ checkbox: element as HTMLInputElement, row: rowFor(element as HTMLInputElement) }))
+        .filter((entry): entry is { checkbox: HTMLInputElement; row: HTMLElement } => entry.row !== null);
+      const matches = rows.filter((entry) => textOf(entry.row).includes(wanted));
+      const input = Array.from(picker.querySelectorAll('input:not([type="checkbox"]):not([type="radio"])')).find((element) => visible(element) && /多个关键词|关键词|以,隔开/gu.test(element.getAttribute('placeholder') || '')) as HTMLInputElement | undefined;
+      return {
+        visiblePitcherOptions: rows.length,
+        matchingPitcherOptions: matches.length,
+        checkedMatchingPitcherOptions: matches.filter((entry) => entry.checkbox.checked).length,
+        checkedPitcherOptions: rows.filter((entry) => entry.checkbox.checked).length,
+        searchValueMatches: input ? input.value.trim() === search : true,
+      };
+    }})(${JSON.stringify(optionValue)}, ${JSON.stringify(searchValue)})`, stage);
+  }
+
+  private async selectPitcherInPicker(value: string): Promise<void> {
+    const target = pitcherFilterSearchTarget(value);
+    if (await this.hasPitcherSearchInput()) await this.setPitcherSearchValue(target.searchValue);
+    const deadline = Date.now() + 5000;
+    let latest: PitcherDialogOptionState | null = null;
+    while (Date.now() < deadline) {
+      latest = await this.readPitcherDialogOptionState(target.optionValue, 'filters.pitcher.option-ready', target.searchValue).catch(() => null);
+      if (latest?.searchValueMatches && latest.matchingPitcherOptions === 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+    if (!latest || latest.matchingPitcherOptions !== 1) throw new ConnectorError('PITCHER_FILTER_NOT_APPLIED', '后台投手筛选结果未能唯一定位，请填写完整的投手筛选项后重试。');
+    if (latest.checkedMatchingPitcherOptions === 1) return;
+    for (const mode of [...REPORT_FRAME_CLICK_MODES]) {
+      try {
+        await this.clickReportFrameControl('pitcher-option', mode, target.optionValue);
+        const checkedDeadline = Date.now() + 3000;
+        while (Date.now() < checkedDeadline) {
+          const state = await this.readPitcherDialogOptionState(target.optionValue, 'filters.pitcher.option-checked', target.searchValue).catch(() => null);
+          if (state?.checkedMatchingPitcherOptions === 1) return;
+          await new Promise((resolve) => setTimeout(resolve, 120));
+        }
+      } catch {
+        // Continue through the real input routes only.
+      }
+    }
+    throw new ConnectorError('PITCHER_FILTER_NOT_APPLIED', '后台投手筛选项未保持选中，请重新尝试。');
+  }
+
+  private async clickPitcherAddFilter(): Promise<void> {
+    for (const mode of [...REPORT_FRAME_CLICK_MODES]) {
+      try {
+        await this.clickReportFrameControl('pitcher-apply', mode);
+        await this.waitForPitcherPicker(false);
+        return;
+      } catch {
+        if (!await this.hasPitcherPicker()) return;
+      }
+    }
+    throw new ConnectorError('PITCHER_FILTER_NOT_APPLIED', '后台投手筛选没有成功提交，请重新尝试。');
+  }
+
+  private async setPitcherFilters(values: string[]): Promise<void> {
+    const filters = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+    try {
+      for (const [index, value] of filters.entries()) {
+        await this.preparePitcherFilter(`filters.pitcher.prepare.${index + 1}`);
+        await this.selectPitcherInPicker(value);
+        await this.clickPitcherAddFilter();
+        await this.diagnostics.event('filters.pitcher.item-applied', { result: 'true', rows: index + 1 });
+      }
+    } catch (error) {
+      if (error instanceof ConnectorError) throw error;
+      throw new ConnectorError('PITCHER_FILTER_NOT_APPLIED', '后台投手筛选没有成功提交，请重新尝试。');
+    }
+  }
+
   private startQueryBatch(): QueryBatch {
     const urls = new Set<string>();
     const webRequest = this.browser.webContents.session.webRequest;
@@ -1202,8 +2100,10 @@ export class Q1Connector {
   private async waitForCondition(read: () => Promise<boolean>, timeout = 3_000): Promise<boolean> {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
+      this.throwIfTaskCancelled();
       if (await read()) return true;
       await new Promise((resolve) => setTimeout(resolve, 80));
+      this.throwIfTaskCancelled();
     }
     return false;
   }
@@ -1355,6 +2255,7 @@ export class Q1Connector {
     const incomeLabel = incomeLabelForType(query.incomeType);
     await this.clickControlUntil('income-selector', 'filters.income.open', () => this.hasIncomeOption(incomeLabel));
     await this.clickControlUntil('income-option', 'filters.income.select', () => this.hasIncomeLabelSelected(incomeLabel), incomeLabel);
+    await this.setPitcherFilters(query.pitcherFilters ?? []);
     await this.diagnostics.event('filters.report.readback', {
       datePickerCountBefore,
       datePickerCountAfter: await this.visibleDateInputCount(),
@@ -1420,6 +2321,7 @@ export class Q1Connector {
       }
       onProgress?.(1);
     } catch (error) {
+      this.throwIfTaskCancelled();
       await this.diagnostics.error('overview.range-baseline.failed', error);
       issues.push({ level: 'warning', code: 'amount_baseline_unavailable', message: '后台日期范围汇总读取失败，已跳过金额差异校验，不影响本次报表生成。' });
     }
@@ -1427,15 +2329,17 @@ export class Q1Connector {
   }
 
   async pull(query: ReportQuery, config: ProjectConfig, onProgress?: (value: number) => void, options: PullOptions = {}): Promise<ReportData> {
+    this.throwIfTaskCancelled();
     await this.diagnostics.begin();
     await this.diagnostics.event('pull.started');
     try {
       const report = await this.pullOverviewDaily(query, config, onProgress, options);
+      this.throwIfTaskCancelled();
       if (report.rows.length === 0) throw new ConnectorError('EMPTY_REPORT_DATA', '后台查询完成，但没有识别到符合当前 PID、日期和筛选条件的数据。请检查筛选条件后重试。');
       return report;
     } catch (error) {
       await this.diagnostics.error('overview.daily.failed', error);
-      if (error instanceof ConnectorError && ['NOT_LOGGED_IN', 'PID_FILTER_NOT_APPLIED', 'QUERY_CONDITIONS_NOT_APPLIED', 'QUERY_RESULT_TIMEOUT', 'TARGET_PID_NOT_FOUND', 'DETAIL_CARD_UNAVAILABLE', 'EMPTY_REPORT_DATA'].includes(error.code)) throw error;
+      if (error instanceof ConnectorError && ['TASK_CANCELLED', 'NOT_LOGGED_IN', 'PID_FILTER_NOT_APPLIED', 'QUERY_CONDITIONS_NOT_APPLIED', 'QUERY_RESULT_TIMEOUT', 'TARGET_PID_NOT_FOUND', 'DETAIL_CARD_UNAVAILABLE', 'EMPTY_REPORT_DATA'].includes(error.code)) throw error;
       throw new ConnectorError('DATA_SOURCE_UNAVAILABLE', '广告概览逐日数据读取失败，请检查后台登录状态、筛选条件和导出权限后重试。');
     }
   }

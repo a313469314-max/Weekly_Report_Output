@@ -15,6 +15,7 @@ const SAFE_DETAIL_KEYS = new Set([
   'candidateIndex', 'spendAvailableRows', 'activatedDevicesAvailableRows', 'sameDayPaymentAvailableRows', 'paymentAvailableRows',
   'startDateMatches', 'endDateMatches', 'paymentStatsEndDateMatches', 'incomeTypeMatches', 'pidFilterMatches',
   'datePickerCountBefore', 'datePickerCountAfter', 'datePickerFailure', 'datePickerFailureReason',
+  'attempt', 'maxAttempts',
 ]);
 
 function safeText(value: unknown): string {

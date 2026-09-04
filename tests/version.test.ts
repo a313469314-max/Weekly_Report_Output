@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildDailyQuery, ConnectorError, datePickerDayAriaLabel, datePickerYearFromHeader, dateRange, incomeLabelForType, isSelectedVersionCurrent, missingPidsFromFilterLabel, queryConditionMismatches, selectValidVersionCandidates, shouldRetryDailyPageSetup } from '../src/main/q1-connector';
+import { buildDailyQuery, ConnectorError, datePickerDayAriaLabel, datePickerYearFromHeader, dateRange, incomeLabelForType, isSelectedVersionCurrent, missingPidsFromFilterLabel, pitcherFilterSearchTarget, queryConditionMismatches, selectValidVersionCandidates, shouldRetryDailyPageSetup } from '../src/main/q1-connector';
 
 describe('game version selection', () => {
+  it('maps a pitcher code to the backend option label while keeping the search input short', () => {
+    expect(pitcherFilterSearchTarget('fz')).toEqual({ searchValue: 'fz', optionValue: 'fz:fz' });
+    expect(pitcherFilterSearchTarget('fz:fz')).toEqual({ searchValue: 'fz', optionValue: 'fz:fz' });
+    expect(pitcherFilterSearchTarget('fz：fz')).toEqual({ searchValue: 'fz', optionValue: 'fz:fz' });
+  });
+
   it('returns all valid versions for manual selection', () => {
     const result = selectValidVersionCandidates([
       { key: '2170-CN-A', name: '中文版', gameId: '2170', flag: 1 },

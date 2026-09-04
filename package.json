@@ -15,7 +15,9 @@
     "preview": "electron-vite preview"
   },
   "dependencies": {
+    "dingtalk-stream": "^2.1.6-beta.1",
     "exceljs": "^4.4.0",
+    "jsqr": "1.4.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "zod": "^3.25.76"

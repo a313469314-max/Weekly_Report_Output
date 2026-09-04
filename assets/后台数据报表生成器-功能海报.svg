@@ -1,0 +1,207 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1600" viewBox="0 0 1200 1600" role="img" aria-labelledby="title desc">
+  <title id="title">后台数据报表生成器功能海报</title>
+  <desc id="desc">展示登录后台、校验 PID、逐日取数、生成 Excel，以及实时播报和定时群机器人功能。</desc>
+  <defs>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101B33"/>
+      <stop offset="1" stop-color="#183E64"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#00C8D7"/>
+      <stop offset="1" stop-color="#3C7DFF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#07101E" flood-opacity="0.16"/>
+    </filter>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#07101E" flood-opacity="0.12"/>
+    </filter>
+    <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse">
+      <path d="M36 0H0V36" fill="none" stroke="#FFFFFF" stroke-opacity="0.045"/>
+    </pattern>
+    <style>
+      .sans { font-family: "Microsoft YaHei", "Noto Sans SC", "Segoe UI", Arial, sans-serif; }
+      .mono { font-family: Consolas, "SFMono-Regular", monospace; }
+      .eyebrow { font-size: 20px; letter-spacing: 3px; font-weight: 700; }
+      .title { font-size: 66px; font-weight: 800; letter-spacing: 0; }
+      .subtitle { font-size: 26px; font-weight: 500; }
+      .section { font-size: 22px; font-weight: 800; letter-spacing: 1px; }
+      .card-title { font-size: 25px; font-weight: 800; }
+      .card-copy { font-size: 17px; font-weight: 500; }
+      .small { font-size: 15px; font-weight: 600; }
+      .tiny { font-size: 13px; font-weight: 600; }
+    </style>
+  </defs>
+
+  <!-- Hero -->
+  <rect width="1200" height="1600" fill="#F3F6FA"/>
+  <rect width="1200" height="625" fill="url(#hero)"/>
+  <rect width="1200" height="625" fill="url(#grid)"/>
+  <path d="M-30 505 C190 400 300 550 495 470 S870 300 1235 430" fill="none" stroke="#36D4DD" stroke-opacity="0.26" stroke-width="2"/>
+  <path d="M-30 540 C190 435 300 585 495 505 S870 335 1235 465" fill="none" stroke="#3C7DFF" stroke-opacity="0.23" stroke-width="2"/>
+
+  <!-- Brand lockup -->
+  <g transform="translate(72 62)">
+    <g transform="translate(0 3)">
+      <rect x="0" y="16" width="25" height="25" rx="5" fill="#23D4D8" transform="rotate(-22 12.5 28.5)"/>
+      <rect x="32" y="0" width="25" height="25" rx="5" fill="#3E7DFF" transform="rotate(20 44.5 12.5)"/>
+      <rect x="34" y="33" width="25" height="25" rx="5" fill="#A7E72A" transform="rotate(-20 46.5 45.5)"/>
+      <rect x="3" y="48" width="25" height="25" rx="5" fill="#FFAA1F" transform="rotate(22 15.5 60.5)"/>
+    </g>
+    <text x="78" y="30" class="sans eyebrow" fill="#A9BBD7">Q1 OPERATIONS</text>
+    <text x="78" y="61" class="sans small" fill="#FFFFFF">运营数据工作台</text>
+  </g>
+
+  <text x="72" y="210" class="sans title" fill="#FFFFFF">后台数据报表生成器</text>
+  <text x="75" y="265" class="sans subtitle" fill="#D8E6F8">登录一次，取数、汇总、校验、交付一气呵成</text>
+
+  <!-- Input chips -->
+  <g transform="translate(74 325)">
+    <text x="0" y="0" class="sans section" fill="#FFFFFF">把复杂后台流程，变成四步可视化操作</text>
+    <g transform="translate(0 28)">
+      <rect width="150" height="44" rx="8" fill="#FFFFFF" fill-opacity="0.1" stroke="#7DDCE4" stroke-opacity="0.75"/>
+      <text x="75" y="28" text-anchor="middle" class="mono small" fill="#DDFBFC">gameid</text>
+      <rect x="164" width="150" height="44" rx="8" fill="#FFFFFF" fill-opacity="0.1" stroke="#7DDCE4" stroke-opacity="0.75"/>
+      <text x="239" y="28" text-anchor="middle" class="mono small" fill="#DDFBFC">PID</text>
+      <rect x="328" width="150" height="44" rx="8" fill="#FFFFFF" fill-opacity="0.1" stroke="#7DDCE4" stroke-opacity="0.75"/>
+      <text x="403" y="28" text-anchor="middle" class="mono small" fill="#DDFBFC">日期范围</text>
+      <rect x="492" width="166" height="44" rx="8" fill="#FFFFFF" fill-opacity="0.1" stroke="#7DDCE4" stroke-opacity="0.75"/>
+      <text x="575" y="28" text-anchor="middle" class="sans small" fill="#DDFBFC">收入 / 实收</text>
+    </g>
+  </g>
+
+  <!-- Main workflow -->
+  <text x="72" y="645" class="sans section" fill="#15243A">核心工作流</text>
+  <text x="1128" y="645" text-anchor="end" class="sans small" fill="#6A7B91">从登录到报表，过程可追溯</text>
+
+  <!-- Connector line -->
+  <path d="M174 802 H1026" stroke="#B9C8D8" stroke-width="4" stroke-linecap="round"/>
+  <path d="M1026 802 l-18 -12 v24 z" fill="#3C7DFF"/>
+
+  <!-- Step 1 -->
+  <g transform="translate(72 706)" filter="url(#shadow)">
+    <rect width="246" height="280" rx="14" fill="#FFFFFF"/>
+    <rect width="246" height="8" rx="4" fill="#3C7DFF"/>
+    <circle cx="43" cy="57" r="29" fill="#E8F0FF"/>
+    <rect x="31" y="46" width="24" height="19" rx="3" fill="none" stroke="#3C7DFF" stroke-width="3"/>
+    <path d="M37 42h12M43 65v8M35 74h16" fill="none" stroke="#3C7DFF" stroke-width="3" stroke-linecap="round"/>
+    <text x="85" y="64" class="sans small" fill="#3C7DFF">01 / 登录</text>
+    <text x="24" y="125" class="sans card-title" fill="#15243A">内置可见浏览器</text>
+    <text x="24" y="164" class="sans card-copy" fill="#596B80">账号、密码、短信验证码</text>
+    <text x="24" y="190" class="sans card-copy" fill="#596B80">由用户亲自输入，Cookie</text>
+    <text x="24" y="216" class="sans card-copy" fill="#596B80">加密保存，不落明文。</text>
+    <rect x="24" y="237" width="136" height="25" rx="6" fill="#EEF4FF"/>
+    <text x="92" y="254" text-anchor="middle" class="sans tiny" fill="#3C7DFF">登录状态可复用</text>
+  </g>
+
+  <!-- Step 2 -->
+  <g transform="translate(334 706)" filter="url(#shadow)">
+    <rect width="246" height="280" rx="14" fill="#FFFFFF"/>
+    <rect width="246" height="8" rx="4" fill="#00B9C5"/>
+    <circle cx="43" cy="57" r="29" fill="#E2FAFB"/>
+    <path d="M43 39l20 8v15c0 14-9 23-20 28-11-5-20-14-20-28V47z" fill="none" stroke="#00AAB7" stroke-width="3"/>
+    <path d="M33 58l7 7 14-15" fill="none" stroke="#00AAB7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="85" y="64" class="sans small" fill="#00AAB7">02 / 校验</text>
+    <text x="24" y="125" class="sans card-title" fill="#15243A">版本与 PID 确认</text>
+    <text x="24" y="164" class="sans card-copy" fill="#596B80">自动读取有效 gameVersionID</text>
+    <text x="24" y="190" class="sans card-copy" fill="#596B80">校验数字 PID、渠道、系统</text>
+    <text x="24" y="216" class="sans card-copy" fill="#596B80">异常项先提示，避免误查。</text>
+    <rect x="24" y="237" width="152" height="25" rx="6" fill="#E7FAFB"/>
+    <text x="100" y="254" text-anchor="middle" class="sans tiny" fill="#009CA8">重复 / 错 PID 可追溯</text>
+  </g>
+
+  <!-- Step 3 -->
+  <g transform="translate(596 706)" filter="url(#shadow)">
+    <rect width="246" height="280" rx="14" fill="#FFFFFF"/>
+    <rect width="246" height="8" rx="4" fill="#F0A31A"/>
+    <circle cx="43" cy="57" r="29" fill="#FFF4DB"/>
+    <path d="M29 54h28M29 63h28M36 44h14M36 72h14" stroke="#D98700" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="33" cy="44" r="2.5" fill="#D98700"/><circle cx="33" cy="54" r="2.5" fill="#D98700"/><circle cx="33" cy="63" r="2.5" fill="#D98700"/><circle cx="33" cy="72" r="2.5" fill="#D98700"/>
+    <text x="85" y="64" class="sans small" fill="#D98700">03 / 取数</text>
+    <text x="24" y="125" class="sans card-title" fill="#15243A">后台逐日读取</text>
+    <text x="24" y="164" class="sans card-copy" fill="#596B80">结构化广告概览数据</text>
+    <text x="24" y="190" class="sans card-copy" fill="#596B80">RADID 明细 + PID 汇总</text>
+    <text x="24" y="216" class="sans card-copy" fill="#596B80">自动保留两层数据口径。</text>
+    <rect x="24" y="237" width="142" height="25" rx="6" fill="#FFF4DB"/>
+    <text x="95" y="254" text-anchor="middle" class="sans tiny" fill="#B87500">混投数据不重复计算</text>
+  </g>
+
+  <!-- Step 4 -->
+  <g transform="translate(858 706)" filter="url(#shadow)">
+    <rect width="246" height="280" rx="14" fill="#FFFFFF"/>
+    <rect width="246" height="8" rx="4" fill="#EF5B61"/>
+    <circle cx="43" cy="57" r="29" fill="#FFF0F1"/>
+    <rect x="28" y="42" width="30" height="32" rx="3" fill="none" stroke="#D94750" stroke-width="3"/>
+    <path d="M35 51h16M35 59h16M35 67h11" stroke="#D94750" stroke-width="3" stroke-linecap="round"/>
+    <path d="M53 69l8 8 10-12" fill="none" stroke="#D94750" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="85" y="64" class="sans small" fill="#D94750">04 / 交付</text>
+    <text x="24" y="125" class="sans card-title" fill="#15243A">一键生成 Excel</text>
+    <text x="24" y="164" class="sans card-copy" fill="#596B80">总体、媒体、出价、投手</text>
+    <text x="24" y="190" class="sans card-copy" fill="#596B80">校验、源数据完整保留</text>
+    <text x="24" y="216" class="sans card-copy" fill="#596B80">WPS / Microsoft Excel 可开。</text>
+    <rect x="24" y="237" width="145" height="25" rx="6" fill="#FFF0F1"/>
+    <text x="96" y="254" text-anchor="middle" class="sans tiny" fill="#C33B44">固定指标，格式统一</text>
+  </g>
+
+  <!-- Data model band -->
+  <g transform="translate(72 1038)">
+    <text x="0" y="0" class="sans section" fill="#15243A">一份后台数据，自动整理成运营视角</text>
+    <text x="0" y="34" class="sans card-copy" fill="#64758A">按媒体、渠道、操作系统、出价方式和投手拆开，汇总结果可回到源数据核对。</text>
+    <g transform="translate(0 65)" filter="url(#softShadow)">
+      <rect width="332" height="126" rx="12" fill="#FFFFFF"/>
+      <rect x="0" width="8" height="126" rx="4" fill="#3C7DFF"/>
+      <text x="28" y="40" class="sans card-title" fill="#15243A">报表维度</text>
+      <text x="28" y="72" class="sans small" fill="#53667C">媒体 · 渠道 · 系统 · 出价</text>
+      <text x="28" y="98" class="sans small" fill="#53667C">投手 · TAP主站 / ADN</text>
+    </g>
+    <g transform="translate(350 65)" filter="url(#softShadow)">
+      <rect width="332" height="126" rx="12" fill="#FFFFFF"/>
+      <rect x="0" width="8" height="126" rx="4" fill="#00B9C5"/>
+      <text x="28" y="40" class="sans card-title" fill="#15243A">指标计算</text>
+      <text x="28" y="72" class="sans small" fill="#53667C">消耗 · 激活 · 付费 · ROI</text>
+      <text x="28" y="98" class="sans small" fill="#53667C">先汇总分子 / 分母，再计算比例</text>
+    </g>
+    <g transform="translate(700 65)" filter="url(#softShadow)">
+      <rect width="428" height="126" rx="12" fill="#FFFFFF"/>
+      <rect x="0" width="8" height="126" rx="4" fill="#F0A31A"/>
+      <text x="28" y="40" class="sans card-title" fill="#15243A">数据可信</text>
+      <text x="28" y="72" class="sans small" fill="#53667C">缺失字段、异常比例、金额差异</text>
+      <text x="28" y="98" class="sans small" fill="#53667C">进入“数据校验”Sheet，不阻断导出</text>
+    </g>
+  </g>
+
+  <!-- Feature cards -->
+  <g transform="translate(72 1300)">
+    <text x="0" y="0" class="sans section" fill="#15243A">不止一张 Excel</text>
+    <g transform="translate(0 30)" filter="url(#softShadow)">
+      <rect width="340" height="160" rx="12" fill="#102442"/>
+      <circle cx="38" cy="43" r="20" fill="#23D4D8"/>
+      <path d="M28 43h20M38 33v20" stroke="#102442" stroke-width="3" stroke-linecap="round"/>
+      <text x="72" y="50" class="sans card-title" fill="#FFFFFF">实时播报</text>
+      <text x="28" y="91" class="sans card-copy" fill="#C7D8EC">按 PID 生成文字，复制即发</text>
+      <text x="28" y="119" class="sans small" fill="#7FE8EB">实时数据 · 标题可配置</text>
+    </g>
+    <g transform="translate(362 30)" filter="url(#softShadow)">
+      <rect width="340" height="160" rx="12" fill="#FFFFFF"/>
+      <circle cx="38" cy="43" r="20" fill="#FFF0D1"/>
+      <path d="M38 31v13l9 6" fill="none" stroke="#D98700" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="38" cy="43" r="13" fill="none" stroke="#D98700" stroke-width="3"/>
+      <text x="72" y="50" class="sans card-title" fill="#15243A">定时汇报</text>
+      <text x="28" y="91" class="sans card-copy" fill="#596B80">按北京时间自动取当天数据</text>
+      <text x="28" y="119" class="sans small" fill="#B87500">钉钉 / 飞书 · 失败不自动重试</text>
+    </g>
+    <g transform="translate(724 30)" filter="url(#softShadow)">
+      <rect width="404" height="160" rx="12" fill="#FFFFFF"/>
+      <circle cx="38" cy="43" r="20" fill="#FFE6E7"/>
+      <path d="M29 43l6 6 13-14" fill="none" stroke="#D94750" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="72" y="50" class="sans card-title" fill="#15243A">配置一次，反复使用</text>
+      <text x="28" y="91" class="sans card-copy" fill="#596B80">项目、媒体规则、指标、Sheet 顺序</text>
+      <text x="28" y="119" class="sans small" fill="#C33B44">按 gameid 隔离保存 · 无需 JSON</text>
+    </g>
+  </g>
+
+  <!-- Footer -->
+  <line x1="72" y1="1528" x2="1128" y2="1528" stroke="#D5DEE8" stroke-width="1"/>
+  <text x="72" y="1563" class="sans tiny" fill="#6A7B91">后台数据报表生成器</text>
+  <text x="1128" y="1563" text-anchor="end" class="sans tiny" fill="#6A7B91">让每一次取数，都能直接交付</text>
+</svg>
